@@ -3,7 +3,13 @@
 Fecha: 2026-04-29
 
 ## Estado actual
-El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correctamente y el módulo operacional ya extendido hasta fase 2 con catálogo, líneas manuales/extras, descuentos y cancelaciones simples, validado con smoke tests manuales.
+El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correctamente y el módulo operacional extendido con:
+- fase 1 de tickets/alquileres/pagos
+- fase 2 de catálogo/manual/extras/descuentos/cancelaciones simples
+- mantenimiento de catálogo
+- cancelación avanzada de tickets con reversos de pago
+
+Todo quedó validado con smoke tests manuales y compilando correctamente con `npm run build`.
 
 ## Stack base implementado
 - Node.js
@@ -124,7 +130,9 @@ El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correc
 - `5f02429` feat: add categories resources and rate plans module
 - `a000d66` docs: add tickets rentals payments design spec
 - `b7b207f` feat: add tickets rentals payments operations module
-- `b8046cc` docs: add phase 2 operations design spec
+- `57a3f55` feat: add phase 2 catalog discounts and cancellations
+- `d6a3770` feat: add catalog maintenance endpoints and filters
+- `fe24353` feat: add ticket cancellation with payment reversals
 
 ## Specs escritas
 - `docs/superpowers/specs/2026-04-29-app-alquileres-design.md`
@@ -154,7 +162,7 @@ Se hizo smoke test manual exitoso cubriendo:
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- tests automatizados del módulo operations
+- tests automatizados del módulo `operations`
 - reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
 
@@ -163,5 +171,13 @@ Al volver, revisar primero:
 1. que Docker siga levantado
 2. que Prisma esté migrado
 3. que el servidor arranque con `npm run dev`
-4. reprobar smoke tests de fase 1, fase 2, mantenimiento de catálogo y reversos
-5. decidir si el siguiente bloque será tests automatizados o cancelaciones operativas más avanzadas
+4. correr `npm run build`
+5. reprobar smoke tests de:
+   - fase 1 operaciones
+   - fase 2 operaciones
+   - mantenimiento de catálogo
+   - cancelación con reversos
+6. decidir si el siguiente bloque será:
+   - tests automatizados
+   - reversos más finos
+   - cancelaciones operativas de alquiler
