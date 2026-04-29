@@ -1,4 +1,5 @@
 import {
+  CatalogItemType,
   GlobalRole,
   MembershipRole,
   PaymentMethod,
@@ -17,6 +18,17 @@ type ListTicketsQuery = {
   status?: TicketStatus;
 };
 
+type ListCatalogItemsQuery = {
+  branchId?: string;
+};
+
+type CreateCatalogItemInput = {
+  name: string;
+  type: CatalogItemType;
+  price: number;
+  branchId?: string;
+};
+
 type RentalInput = {
   resourceId: string;
   reservedMinutes: number;
@@ -32,6 +44,26 @@ type CreatePaymentInput = {
   method: PaymentMethod;
   amount: number;
   notes?: string;
+};
+
+type AddCatalogItemToTicketInput = {
+  catalogItemId: string;
+  quantity: number;
+};
+
+type AddManualItemToTicketInput = {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+};
+
+type ApplyDiscountInput = {
+  discountAmount: number;
+  reason?: string;
+};
+
+type CancelInput = {
+  reason: string;
 };
 
 type PrismaTx = Prisma.TransactionClient;
@@ -52,11 +84,26 @@ function ceilDiv(a: number, b: number) {
   return Math.ceil(a / b);
 }
 
-async function ensureOperationsAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
-  const branch = await ensureBranchInCompany(companyId, branchId);
+function isZero(value: number) {
+  return Math.abs(value) < 0.000001;
+}
+
+function grossSubtotal(quantity: number, unitPrice: number) {
+  return quantity * unitPrice;
+}
+
+async function ensureOperationalCompanyAccess(companyId: string, userId: string, globalRole: GlobalRole) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, status: true },
+  });
+
+  if (!company || company.status !== RecordStatus.ACTIVE) {
+    throw new AppError(404, 'Company not found');
+  }
 
   if (globalRole === GlobalRole.SUPERADMIN) {
-    return branch;
+    return company;
   }
 
   const [companyMembership, branchMembership] = await Promise.all([
@@ -71,10 +118,13 @@ async function ensureOperationsAccess(companyId: string, branchId: string, userI
     }),
     prisma.branchUser.findFirst({
       where: {
-        branchId,
         userId,
         role: { in: [MembershipRole.ADMIN_SEDE, MembershipRole.CAJERO, MembershipRole.RECEPCION] },
         status: RecordStatus.ACTIVE,
+        branch: {
+          companyId,
+          status: RecordStatus.ACTIVE,
+        },
       },
       select: { id: true },
     }),
@@ -84,24 +134,18 @@ async function ensureOperationsAccess(companyId: string, branchId: string, userI
     throw new AppError(403, 'Insufficient permissions');
   }
 
-  return branch;
+  return company;
+}
+
+async function ensureOperationsAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
+  await ensureOperationalCompanyAccess(companyId, userId, globalRole);
+  return ensureBranchInCompany(companyId, branchId);
 }
 
 async function ensureTicketInBranch(tx: PrismaTx, companyId: string, branchId: string, ticketId: string) {
   const ticket = await tx.ticket.findFirst({
     where: { id: ticketId, companyId, branchId },
-    select: {
-      id: true,
-      companyId: true,
-      branchId: true,
-      openedById: true,
-      ticketNumber: true,
-      status: true,
-      subtotal: true,
-      total: true,
-      openedAt: true,
-      closedAt: true,
-    },
+    select: ticketSummarySelect,
   });
 
   if (!ticket) {
@@ -109,6 +153,24 @@ async function ensureTicketInBranch(tx: PrismaTx, companyId: string, branchId: s
   }
 
   return ticket;
+}
+
+function ensureTicketOpen(ticket: { status: TicketStatus; cancelledAt: Date | null }) {
+  if (ticket.status === TicketStatus.CANCELLED || ticket.cancelledAt) {
+    throw new AppError(409, 'Ticket is cancelled');
+  }
+
+  if (ticket.status !== TicketStatus.OPEN) {
+    throw new AppError(409, 'Ticket is closed');
+  }
+}
+
+async function ensureTicketWithoutPayments(tx: PrismaTx, ticketId: string) {
+  const count = await tx.payment.count({ where: { ticketId } });
+
+  if (count > 0) {
+    throw new AppError(409, 'Ticket with payments does not allow this simple discount/cancellation operation');
+  }
 }
 
 async function ensureResourceOperable(tx: PrismaTx, companyId: string, branchId: string, resourceId: string) {
@@ -155,12 +217,7 @@ async function ensureResourceOperable(tx: PrismaTx, companyId: string, branchId:
   return resource;
 }
 
-async function ensureResourceAvailable(
-  tx: PrismaTx,
-  resourceId: string,
-  startAt: Date,
-  scheduledEndAt: Date,
-) {
+async function ensureResourceAvailable(tx: PrismaTx, resourceId: string, startAt: Date, scheduledEndAt: Date) {
   const overlapping = await tx.rentalSession.findFirst({
     where: {
       resourceId,
@@ -170,9 +227,7 @@ async function ensureResourceAvailable(
       startAt: { lt: scheduledEndAt },
       scheduledEndAt: { gt: startAt },
     },
-    select: {
-      id: true,
-    },
+    select: { id: true },
   });
 
   if (overlapping) {
@@ -183,12 +238,7 @@ async function ensureResourceAvailable(
 async function resolveRatePlan(tx: PrismaTx, companyId: string, branchId: string, resourceId: string, categoryId: string) {
   const [resourcePlan, categoryPlan, branchPlan] = await Promise.all([
     tx.ratePlan.findFirst({
-      where: {
-        companyId,
-        branchId,
-        resourceId,
-        status: RecordStatus.ACTIVE,
-      },
+      where: { companyId, branchId, resourceId, status: RecordStatus.ACTIVE },
       orderBy: { createdAt: 'desc' },
     }),
     tx.ratePlan.findFirst({
@@ -268,34 +318,76 @@ async function getNextTicketNumber(tx: PrismaTx, branchId: string) {
   return (lastTicket?.ticketNumber ?? 0) + 1;
 }
 
+const ticketSummarySelect = {
+  id: true,
+  companyId: true,
+  branchId: true,
+  openedById: true,
+  ticketNumber: true,
+  status: true,
+  subtotal: true,
+  discountAmount: true,
+  discountReason: true,
+  total: true,
+  openedAt: true,
+  closedAt: true,
+  cancelledAt: true,
+  cancellationReason: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+const ticketItemSelect = {
+  id: true,
+  ticketId: true,
+  type: true,
+  description: true,
+  quantity: true,
+  unitPrice: true,
+  subtotal: true,
+  discountAmount: true,
+  discountReason: true,
+  cancelledAt: true,
+  cancellationReason: true,
+  metadata: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
 async function recalculateTicketTotals(tx: PrismaTx, ticketId: string) {
-  const items = await tx.ticketItem.findMany({
-    where: { ticketId },
-    select: { subtotal: true },
-  });
+  const [items, ticket] = await Promise.all([
+    tx.ticketItem.findMany({
+      where: {
+        ticketId,
+        cancelledAt: null,
+      },
+      select: { subtotal: true },
+    }),
+    tx.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, status: true, discountAmount: true },
+    }),
+  ]);
+
+  if (!ticket) {
+    throw new AppError(404, 'Ticket not found');
+  }
 
   const subtotal = items.reduce((sum, item) => sum + decimalToNumber(item.subtotal), 0);
+  const ticketDiscountAmount = decimalToNumber(ticket.discountAmount);
+  const total = subtotal - ticketDiscountAmount;
+
+  if (total < -0.000001) {
+    throw new AppError(409, 'Ticket total cannot be negative');
+  }
 
   return tx.ticket.update({
     where: { id: ticketId },
     data: {
       subtotal: toDecimal(subtotal),
-      total: toDecimal(subtotal),
+      total: toDecimal(Math.max(total, 0)),
     },
-    select: {
-      id: true,
-      companyId: true,
-      branchId: true,
-      openedById: true,
-      ticketNumber: true,
-      status: true,
-      subtotal: true,
-      total: true,
-      openedAt: true,
-      closedAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: ticketSummarySelect,
   });
 }
 
@@ -311,20 +403,7 @@ async function getTicketPaidTotal(tx: PrismaTx, ticketId: string) {
 async function buildTicketSummary(tx: PrismaTx, ticketId: string) {
   const ticket = await tx.ticket.findUnique({
     where: { id: ticketId },
-    select: {
-      id: true,
-      companyId: true,
-      branchId: true,
-      openedById: true,
-      ticketNumber: true,
-      status: true,
-      subtotal: true,
-      total: true,
-      openedAt: true,
-      closedAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: ticketSummarySelect,
   });
 
   if (!ticket) {
@@ -337,17 +416,11 @@ async function buildTicketSummary(tx: PrismaTx, ticketId: string) {
   return {
     ...ticket,
     paidTotal,
-    pendingAmount: total - paidTotal,
+    pendingAmount: Math.max(total - paidTotal, 0),
   };
 }
 
-async function createRentalArtifacts(
-  tx: PrismaTx,
-  companyId: string,
-  branchId: string,
-  ticketId: string,
-  input: RentalInput,
-) {
+async function createRentalArtifacts(tx: PrismaTx, companyId: string, branchId: string, ticketId: string, input: RentalInput) {
   const resource = await ensureResourceOperable(tx, companyId, branchId, input.resourceId);
   const ratePlan = await resolveRatePlan(tx, companyId, branchId, resource.id, resource.resourceCategoryId);
   const startAt = input.startAt ?? new Date();
@@ -366,6 +439,7 @@ async function createRentalArtifacts(
       quantity: toDecimal(1),
       unitPrice: toDecimal(baseAmount),
       subtotal: toDecimal(baseAmount),
+      discountAmount: toDecimal(0),
       metadata: {
         resourceId: resource.id,
         resourceName: resource.name,
@@ -377,18 +451,7 @@ async function createRentalArtifacts(
         notes: input.notes ?? null,
       },
     },
-    select: {
-      id: true,
-      ticketId: true,
-      type: true,
-      description: true,
-      quantity: true,
-      unitPrice: true,
-      subtotal: true,
-      metadata: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: ticketItemSelect,
   });
 
   const rentalSession = await tx.rentalSession.create({
@@ -412,29 +475,181 @@ async function createRentalArtifacts(
       overtimeAmount: toDecimal(0),
       totalAmount: toDecimal(baseAmount),
     },
+    select: rentalSessionSelect,
+  });
+
+  return { ticketItem, rentalSession };
+}
+
+const rentalSessionSelect = {
+  id: true,
+  companyId: true,
+  branchId: true,
+  resourceId: true,
+  ticketItemId: true,
+  status: true,
+  startAt: true,
+  scheduledEndAt: true,
+  endedAt: true,
+  reservedMinutes: true,
+  usedMinutes: true,
+  overtimeMinutes: true,
+  ratePlanSnapshot: true,
+  baseAmount: true,
+  overtimeAmount: true,
+  totalAmount: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+async function ensureCatalogItemForTicket(tx: PrismaTx, companyId: string, branchId: string, catalogItemId: string) {
+  const catalogItem = await tx.saleCatalogItem.findFirst({
+    where: {
+      id: catalogItemId,
+      companyId,
+      status: RecordStatus.ACTIVE,
+      OR: [{ branchId: null }, { branchId }],
+    },
     select: {
       id: true,
       companyId: true,
       branchId: true,
-      resourceId: true,
-      ticketItemId: true,
+      type: true,
+      name: true,
+      price: true,
       status: true,
-      startAt: true,
-      scheduledEndAt: true,
-      endedAt: true,
-      reservedMinutes: true,
-      usedMinutes: true,
-      overtimeMinutes: true,
-      ratePlanSnapshot: true,
-      baseAmount: true,
-      overtimeAmount: true,
-      totalAmount: true,
       createdAt: true,
       updatedAt: true,
     },
   });
 
-  return { ticketItem, rentalSession };
+  if (!catalogItem) {
+    throw new AppError(404, 'Catalog item not found');
+  }
+
+  return catalogItem;
+}
+
+async function ensureTicketItemInTicket(tx: PrismaTx, ticketId: string, ticketItemId: string) {
+  const ticketItem = await tx.ticketItem.findFirst({
+    where: {
+      id: ticketItemId,
+      ticketId,
+    },
+    include: {
+      rentalSession: {
+        select: {
+          id: true,
+          status: true,
+          endedAt: true,
+        },
+      },
+    },
+  });
+
+  if (!ticketItem) {
+    throw new AppError(404, 'Ticket item not found');
+  }
+
+  return ticketItem;
+}
+
+function getTicketItemGrossSubtotal(ticketItem: { quantity: Prisma.Decimal | number; unitPrice: Prisma.Decimal | number }) {
+  return decimalToNumber(ticketItem.quantity) * decimalToNumber(ticketItem.unitPrice);
+}
+
+async function createSimpleTicketItem(
+  tx: PrismaTx,
+  ticketId: string,
+  type: TicketItemType,
+  description: string,
+  quantity: number,
+  unitPrice: number,
+  metadata?: Prisma.InputJsonValue,
+) {
+  const subtotal = grossSubtotal(quantity, unitPrice);
+
+  return tx.ticketItem.create({
+    data: {
+      ticketId,
+      type,
+      description,
+      quantity: toDecimal(quantity),
+      unitPrice: toDecimal(unitPrice),
+      subtotal: toDecimal(subtotal),
+      discountAmount: toDecimal(0),
+      metadata,
+    },
+    select: ticketItemSelect,
+  });
+}
+
+export async function createCatalogItem(
+  companyId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: CreateCatalogItemInput,
+) {
+  await ensureOperationalCompanyAccess(companyId, userId, globalRole);
+
+  if (input.branchId) {
+    await ensureBranchInCompany(companyId, input.branchId);
+  }
+
+  return prisma.saleCatalogItem.create({
+    data: {
+      companyId,
+      branchId: input.branchId,
+      type: input.type,
+      name: input.name,
+      price: toDecimal(input.price),
+      status: RecordStatus.ACTIVE,
+    },
+    select: {
+      id: true,
+      companyId: true,
+      branchId: true,
+      type: true,
+      name: true,
+      price: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function listCatalogItems(
+  companyId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  query: ListCatalogItemsQuery,
+) {
+  await ensureOperationalCompanyAccess(companyId, userId, globalRole);
+
+  if (query.branchId) {
+    await ensureBranchInCompany(companyId, query.branchId);
+  }
+
+  return prisma.saleCatalogItem.findMany({
+    where: {
+      companyId,
+      status: RecordStatus.ACTIVE,
+      ...(query.branchId ? { OR: [{ branchId: null }, { branchId: query.branchId }] } : {}),
+    },
+    orderBy: [{ branchId: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      id: true,
+      companyId: true,
+      branchId: true,
+      type: true,
+      name: true,
+      price: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 }
 
 export async function createTicket(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
@@ -451,22 +666,10 @@ export async function createTicket(companyId: string, branchId: string, userId: 
         ticketNumber,
         status: TicketStatus.OPEN,
         subtotal: toDecimal(0),
+        discountAmount: toDecimal(0),
         total: toDecimal(0),
       },
-      select: {
-        id: true,
-        companyId: true,
-        branchId: true,
-        openedById: true,
-        ticketNumber: true,
-        status: true,
-        subtotal: true,
-        total: true,
-        openedAt: true,
-        closedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: ticketSummarySelect,
     });
   });
 }
@@ -488,23 +691,8 @@ export async function listTickets(
     },
     orderBy: [{ openedAt: 'desc' }, { ticketNumber: 'desc' }],
     select: {
-      id: true,
-      companyId: true,
-      branchId: true,
-      openedById: true,
-      ticketNumber: true,
-      status: true,
-      subtotal: true,
-      total: true,
-      openedAt: true,
-      closedAt: true,
-      createdAt: true,
-      updatedAt: true,
-      payments: {
-        select: {
-          amount: true,
-        },
-      },
+      ...ticketSummarySelect,
+      payments: { select: { amount: true } },
     },
   });
 
@@ -513,20 +701,9 @@ export async function listTickets(
     const total = decimalToNumber(ticket.total);
 
     return {
-      id: ticket.id,
-      companyId: ticket.companyId,
-      branchId: ticket.branchId,
-      openedById: ticket.openedById,
-      ticketNumber: ticket.ticketNumber,
-      status: ticket.status,
-      subtotal: ticket.subtotal,
-      total: ticket.total,
-      openedAt: ticket.openedAt,
-      closedAt: ticket.closedAt,
-      createdAt: ticket.createdAt,
-      updatedAt: ticket.updatedAt,
+      ...ticket,
       paidTotal,
-      pendingAmount: total - paidTotal,
+      pendingAmount: Math.max(total - paidTotal, 0),
     };
   });
 }
@@ -543,51 +720,13 @@ export async function getTicketDetail(
   const ticket = await prisma.ticket.findFirst({
     where: { id: ticketId, companyId, branchId },
     select: {
-      id: true,
-      companyId: true,
-      branchId: true,
-      openedById: true,
-      ticketNumber: true,
-      status: true,
-      subtotal: true,
-      total: true,
-      openedAt: true,
-      closedAt: true,
-      createdAt: true,
-      updatedAt: true,
+      ...ticketSummarySelect,
       items: {
         orderBy: { createdAt: 'asc' },
         select: {
-          id: true,
-          type: true,
-          description: true,
-          quantity: true,
-          unitPrice: true,
-          subtotal: true,
-          metadata: true,
-          createdAt: true,
-          updatedAt: true,
+          ...ticketItemSelect,
           rentalSession: {
-            select: {
-              id: true,
-              companyId: true,
-              branchId: true,
-              resourceId: true,
-              ticketItemId: true,
-              status: true,
-              startAt: true,
-              scheduledEndAt: true,
-              endedAt: true,
-              reservedMinutes: true,
-              usedMinutes: true,
-              overtimeMinutes: true,
-              ratePlanSnapshot: true,
-              baseAmount: true,
-              overtimeAmount: true,
-              totalAmount: true,
-              createdAt: true,
-              updatedAt: true,
-            },
+            select: rentalSessionSelect,
           },
         },
       },
@@ -615,7 +754,7 @@ export async function getTicketDetail(
   return {
     ...ticket,
     paidTotal,
-    pendingAmount: total - paidTotal,
+    pendingAmount: Math.max(total - paidTotal, 0),
   };
 }
 
@@ -638,11 +777,10 @@ export async function startRental(
         ticketNumber,
         status: TicketStatus.OPEN,
         subtotal: toDecimal(0),
+        discountAmount: toDecimal(0),
         total: toDecimal(0),
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     });
 
     const { ticketItem, rentalSession } = await createRentalArtifacts(tx, companyId, branchId, ticket.id, input);
@@ -673,10 +811,7 @@ export async function addRentalToTicket(
 
   return prisma.$transaction(async (tx) => {
     const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
-
-    if (ticket.status !== TicketStatus.OPEN) {
-      throw new AppError(409, 'Ticket is closed');
-    }
+    ensureTicketOpen(ticket);
 
     const { ticketItem, rentalSession } = await createRentalArtifacts(tx, companyId, branchId, ticketId, input);
     const ticketSummary = await recalculateTicketTotals(tx, ticketId);
@@ -694,6 +829,294 @@ export async function addRentalToTicket(
   });
 }
 
+export async function addCatalogItemToTicket(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: AddCatalogItemToTicketInput,
+) {
+  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
+    ensureTicketOpen(ticket);
+
+    const catalogItem = await ensureCatalogItemForTicket(tx, companyId, branchId, input.catalogItemId);
+    const item = await createSimpleTicketItem(
+      tx,
+      ticketId,
+      TicketItemType.PRODUCT,
+      catalogItem.name,
+      input.quantity,
+      decimalToNumber(catalogItem.price),
+      {
+        catalogItemId: catalogItem.id,
+        catalogItemType: catalogItem.type,
+        source: 'CATALOG',
+      },
+    );
+
+    const ticketSummary = await recalculateTicketTotals(tx, ticketId);
+    const totals = await buildTicketSummary(tx, ticketId);
+
+    return {
+      ticket: ticketSummary,
+      ticketItem: item,
+      totals: {
+        paidTotal: totals.paidTotal,
+        pendingAmount: totals.pendingAmount,
+      },
+    };
+  });
+}
+
+async function addFreeformTicketItem(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: AddManualItemToTicketInput,
+  type: TicketItemType,
+) {
+  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
+    ensureTicketOpen(ticket);
+
+    const item = await createSimpleTicketItem(tx, ticketId, type, input.description, input.quantity, input.unitPrice, {
+      source: type,
+    });
+    const ticketSummary = await recalculateTicketTotals(tx, ticketId);
+    const totals = await buildTicketSummary(tx, ticketId);
+
+    return {
+      ticket: ticketSummary,
+      ticketItem: item,
+      totals: {
+        paidTotal: totals.paidTotal,
+        pendingAmount: totals.pendingAmount,
+      },
+    };
+  });
+}
+
+export function addManualItemToTicket(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: AddManualItemToTicketInput,
+) {
+  return addFreeformTicketItem(companyId, branchId, ticketId, userId, globalRole, input, TicketItemType.MANUAL);
+}
+
+export function addExtraItemToTicket(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: AddManualItemToTicketInput,
+) {
+  return addFreeformTicketItem(companyId, branchId, ticketId, userId, globalRole, input, TicketItemType.EXTRA);
+}
+
+export async function applyTicketItemDiscount(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  ticketItemId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: ApplyDiscountInput,
+) {
+  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
+    ensureTicketOpen(ticket);
+    await ensureTicketWithoutPayments(tx, ticketId);
+
+    const ticketItem = await ensureTicketItemInTicket(tx, ticketId, ticketItemId);
+
+    if (ticketItem.cancelledAt) {
+      throw new AppError(409, 'Ticket item is cancelled');
+    }
+
+    const gross = getTicketItemGrossSubtotal(ticketItem);
+
+    if (input.discountAmount > gross) {
+      throw new AppError(409, 'Discount exceeds allowed amount');
+    }
+
+    const updatedItem = await tx.ticketItem.update({
+      where: { id: ticketItemId },
+      data: {
+        discountAmount: toDecimal(input.discountAmount),
+        discountReason: input.reason,
+        subtotal: toDecimal(gross - input.discountAmount),
+      },
+      select: ticketItemSelect,
+    });
+
+    const updatedTicket = await recalculateTicketTotals(tx, ticketId);
+    const totals = await buildTicketSummary(tx, ticketId);
+
+    return {
+      ticket: updatedTicket,
+      ticketItem: updatedItem,
+      totals: {
+        paidTotal: totals.paidTotal,
+        pendingAmount: totals.pendingAmount,
+      },
+    };
+  });
+}
+
+export async function applyTicketDiscount(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: ApplyDiscountInput,
+) {
+  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
+    ensureTicketOpen(ticket);
+    await ensureTicketWithoutPayments(tx, ticketId);
+
+    const activeItems = await tx.ticketItem.findMany({
+      where: { ticketId, cancelledAt: null },
+      select: { subtotal: true },
+    });
+    const itemsSubtotal = activeItems.reduce((sum, item) => sum + decimalToNumber(item.subtotal), 0);
+
+    if (input.discountAmount > itemsSubtotal) {
+      throw new AppError(409, 'Discount exceeds allowed amount');
+    }
+
+    await tx.ticket.update({
+      where: { id: ticketId },
+      data: {
+        discountAmount: toDecimal(input.discountAmount),
+        discountReason: input.reason,
+      },
+    });
+
+    const updatedTicket = await recalculateTicketTotals(tx, ticketId);
+    const totals = await buildTicketSummary(tx, ticketId);
+
+    return {
+      ticket: updatedTicket,
+      totals: {
+        paidTotal: totals.paidTotal,
+        pendingAmount: totals.pendingAmount,
+      },
+    };
+  });
+}
+
+export async function cancelTicketItem(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  ticketItemId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: CancelInput,
+) {
+  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
+    ensureTicketOpen(ticket);
+    await ensureTicketWithoutPayments(tx, ticketId);
+
+    const ticketItem = await ensureTicketItemInTicket(tx, ticketId, ticketItemId);
+
+    if (ticketItem.cancelledAt) {
+      throw new AppError(409, 'Ticket item is already cancelled');
+    }
+
+    if (ticketItem.type === TicketItemType.RENTAL && ticketItem.rentalSession) {
+      throw new AppError(409, 'Rental ticket item cannot be cancelled in this phase');
+    }
+
+    const updatedItem = await tx.ticketItem.update({
+      where: { id: ticketItemId },
+      data: {
+        cancelledAt: new Date(),
+        cancellationReason: input.reason,
+      },
+      select: ticketItemSelect,
+    });
+
+    const updatedTicket = await recalculateTicketTotals(tx, ticketId);
+    const totals = await buildTicketSummary(tx, ticketId);
+
+    return {
+      ticket: updatedTicket,
+      ticketItem: updatedItem,
+      totals: {
+        paidTotal: totals.paidTotal,
+        pendingAmount: totals.pendingAmount,
+      },
+    };
+  });
+}
+
+export async function cancelTicket(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: CancelInput,
+) {
+  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
+    ensureTicketOpen(ticket);
+    await ensureTicketWithoutPayments(tx, ticketId);
+
+    const now = new Date();
+
+    await tx.ticketItem.updateMany({
+      where: {
+        ticketId,
+        cancelledAt: null,
+      },
+      data: {
+        cancelledAt: now,
+        cancellationReason: `Ticket cancelled: ${input.reason}`,
+      },
+    });
+
+    return tx.ticket.update({
+      where: { id: ticketId },
+      data: {
+        status: TicketStatus.CANCELLED,
+        cancelledAt: now,
+        cancellationReason: input.reason,
+        subtotal: toDecimal(0),
+        discountAmount: toDecimal(0),
+        discountReason: null,
+        total: toDecimal(0),
+      },
+      select: ticketSummarySelect,
+    });
+  });
+}
+
 export async function finishRental(
   companyId: string,
   branchId: string,
@@ -706,16 +1129,13 @@ export async function finishRental(
 
   return prisma.$transaction(async (tx) => {
     const rentalSession = await tx.rentalSession.findFirst({
-      where: {
-        id: rentalSessionId,
-        companyId,
-        branchId,
-      },
+      where: { id: rentalSessionId, companyId, branchId },
       include: {
         ticketItem: {
           select: {
             id: true,
             ticketId: true,
+            discountAmount: true,
           },
         },
       },
@@ -724,6 +1144,9 @@ export async function finishRental(
     if (!rentalSession) {
       throw new AppError(404, 'Rental session not found');
     }
+
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, rentalSession.ticketItem.ticketId);
+    ensureTicketOpen(ticket);
 
     if (rentalSession.status === RentalSessionStatus.FINISHED || rentalSession.endedAt) {
       throw new AppError(409, 'Rental session is already finished');
@@ -755,6 +1178,11 @@ export async function finishRental(
     const baseAmount = calculateBaseAmount(ratePlanLike, rentalSession.reservedMinutes);
     const overtimeAmount = calculateOvertimeAmount(ratePlanLike, rentalSession.reservedMinutes, overtimeMinutes);
     const totalAmount = baseAmount + overtimeAmount;
+    const lineDiscountAmount = decimalToNumber(rentalSession.ticketItem.discountAmount);
+
+    if (lineDiscountAmount > totalAmount) {
+      throw new AppError(409, 'Discount exceeds allowed amount');
+    }
 
     const updatedSession = await tx.rentalSession.update({
       where: { id: rentalSessionId },
@@ -767,55 +1195,25 @@ export async function finishRental(
         overtimeAmount: toDecimal(overtimeAmount),
         totalAmount: toDecimal(totalAmount),
       },
-      select: {
-        id: true,
-        companyId: true,
-        branchId: true,
-        resourceId: true,
-        ticketItemId: true,
-        status: true,
-        startAt: true,
-        scheduledEndAt: true,
-        endedAt: true,
-        reservedMinutes: true,
-        usedMinutes: true,
-        overtimeMinutes: true,
-        ratePlanSnapshot: true,
-        baseAmount: true,
-        overtimeAmount: true,
-        totalAmount: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: rentalSessionSelect,
     });
 
     const ticketItem = await tx.ticketItem.update({
       where: { id: rentalSession.ticketItem.id },
       data: {
         unitPrice: toDecimal(totalAmount),
-        subtotal: toDecimal(totalAmount),
+        subtotal: toDecimal(totalAmount - lineDiscountAmount),
       },
-      select: {
-        id: true,
-        ticketId: true,
-        type: true,
-        description: true,
-        quantity: true,
-        unitPrice: true,
-        subtotal: true,
-        metadata: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: ticketItemSelect,
     });
 
-    const ticket = await recalculateTicketTotals(tx, rentalSession.ticketItem.ticketId);
+    const updatedTicket = await recalculateTicketTotals(tx, rentalSession.ticketItem.ticketId);
     const totals = await buildTicketSummary(tx, rentalSession.ticketItem.ticketId);
 
     return {
       rentalSession: updatedSession,
       ticketItem,
-      ticket,
+      ticket: updatedTicket,
       totals: {
         paidTotal: totals.paidTotal,
         pendingAmount: totals.pendingAmount,
@@ -836,16 +1234,13 @@ export async function createPayment(
 
   return prisma.$transaction(async (tx) => {
     const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
-
-    if (ticket.status !== TicketStatus.OPEN) {
-      throw new AppError(409, 'Ticket is closed');
-    }
+    ensureTicketOpen(ticket);
 
     const paidTotal = await getTicketPaidTotal(tx, ticketId);
     const ticketTotal = decimalToNumber(ticket.total);
     const pendingAmount = ticketTotal - paidTotal;
 
-    if (input.amount > pendingAmount) {
+    if (input.amount > pendingAmount + 0.000001) {
       throw new AppError(409, 'Payment exceeds pending amount');
     }
 
@@ -874,7 +1269,7 @@ export async function createPayment(
     return {
       payment,
       paidTotal: updatedPaidTotal,
-      pendingAmount: ticketTotal - updatedPaidTotal,
+      pendingAmount: Math.max(ticketTotal - updatedPaidTotal, 0),
     };
   });
 }
@@ -890,21 +1285,14 @@ export async function closeTicket(
 
   return prisma.$transaction(async (tx) => {
     const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
-
-    if (ticket.status !== TicketStatus.OPEN) {
-      throw new AppError(409, 'Ticket is already closed');
-    }
+    ensureTicketOpen(ticket);
 
     const activeSession = await tx.rentalSession.findFirst({
       where: {
         companyId,
         branchId,
-        ticketItem: {
-          ticketId,
-        },
-        status: {
-          in: [RentalSessionStatus.RESERVED, RentalSessionStatus.IN_USE],
-        },
+        ticketItem: { ticketId },
+        status: { in: [RentalSessionStatus.RESERVED, RentalSessionStatus.IN_USE] },
       },
       select: { id: true },
     });
@@ -916,7 +1304,7 @@ export async function closeTicket(
     const paidTotal = await getTicketPaidTotal(tx, ticketId);
     const pendingAmount = decimalToNumber(ticket.total) - paidTotal;
 
-    if (pendingAmount !== 0) {
+    if (!isZero(pendingAmount)) {
       throw new AppError(409, 'Ticket has pending amount');
     }
 
@@ -926,20 +1314,7 @@ export async function closeTicket(
         status: TicketStatus.CLOSED,
         closedAt: new Date(),
       },
-      select: {
-        id: true,
-        companyId: true,
-        branchId: true,
-        openedById: true,
-        ticketNumber: true,
-        status: true,
-        subtotal: true,
-        total: true,
-        openedAt: true,
-        closedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: ticketSummarySelect,
     });
   });
 }
