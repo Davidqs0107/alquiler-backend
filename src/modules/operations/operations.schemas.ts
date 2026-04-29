@@ -1,4 +1,4 @@
-import { CatalogItemType, PaymentMethod, TicketStatus } from '@prisma/client';
+import { CatalogItemType, PaymentMethod, RecordStatus, TicketStatus } from '@prisma/client';
 import { z } from 'zod';
 
 export const createTicketSchema = z.object({}).strict();
@@ -15,8 +15,25 @@ export const createCatalogItemSchema = z.object({
 });
 
 export const listCatalogItemsQuerySchema = z.object({
+  status: z.nativeEnum(RecordStatus).optional(),
   branchId: z.string().trim().min(1).optional(),
+  type: z.nativeEnum(CatalogItemType).optional(),
+  search: z.string().trim().min(1).optional(),
 });
+
+export const updateCatalogItemSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    type: z.nativeEnum(CatalogItemType).optional(),
+    price: z.coerce.number().nonnegative().optional(),
+    branchId: z.union([z.string().trim().min(1), z.null()]).optional(),
+  })
+  .refine((data) => Object.values(data).some((value) => value !== undefined), {
+    message: 'At least one field must be provided',
+  });
+
+export const activateCatalogItemSchema = z.object({}).strict();
+export const deactivateCatalogItemSchema = z.object({}).strict();
 
 export const startRentalSchema = z.object({
   resourceId: z.string().trim().min(1),

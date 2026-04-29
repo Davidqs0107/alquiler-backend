@@ -73,6 +73,11 @@ El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correc
 - cancelar línea no pagada
 - cancelar ticket completo sin pagos
 
+### 6. Mantenimiento de catálogo
+- editar ítems de catálogo
+- activar/inactivar catálogo
+- listar catálogo con filtros por `status`, `branchId`, `type` y búsqueda por nombre
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -90,6 +95,9 @@ El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correc
 - cancelaciones simples solo se permiten en tickets sin pagos
 - tickets cancelados no aceptan nuevas operaciones
 - líneas `RENTAL` no se cancelan libremente en esta fase 2
+- catálogo se puede editar sin romper historial de ventas
+- catálogo se puede activar/inactivar sin borrar trazabilidad
+- listado de catálogo soporta filtros por estado, sede, tipo y búsqueda textual
 - `SUPERADMIN`, `ADMIN_EMPRESA`, `ADMIN_SEDE`, `CAJERO` y `RECEPCION` operan el módulo operacional según alcance
 
 ## Archivos clave
@@ -118,44 +126,36 @@ El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correc
 - `docs/superpowers/specs/2026-04-29-resources-rateplans-design.md`
 - `docs/superpowers/specs/2026-04-29-tickets-rentals-payments-design.md`
 - `docs/superpowers/specs/2026-04-29-sales-manual-extras-discounts-cancellations-design.md`
+- `docs/superpowers/specs/2026-04-29-catalog-maintenance-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la fase 2 del módulo operacional con:
-- `catalog items`
-- líneas `PRODUCT`, `MANUAL` y `EXTRA`
-- descuentos por línea
-- descuentos por ticket
-- cancelación simple de líneas
-- cancelación simple de tickets
-
-Se agregó migración Prisma para descuentos/cancelaciones en `Ticket` y `TicketItem`.
+Se diseñó, implementó y validó el mantenimiento de catálogo con:
+- edición de `SaleCatalogItem`
+- activación e inactivación
+- filtros por `status`, `branchId`, `type` y `search`
 
 Se hizo smoke test manual exitoso cubriendo:
-1. login de `SUPERADMIN`
-2. creación de empresa y sede
-3. creación de catálogo
-4. apertura de ticket
-5. agregado de línea catálogo
-6. agregado de línea manual
-7. agregado de línea extra
-8. descuento por línea
-9. descuento global al ticket
-10. cancelación de línea en ticket sin pagos
-11. cancelación de ticket sin pagos
-12. rechazo de descuento y cancelación cuando el ticket ya tiene pagos
+1. creación de catálogo global y por sede
+2. listado general
+3. listado filtrado por sede
+4. listado filtrado por tipo
+5. búsqueda por nombre
+6. edición de nombre, precio y cambio de alcance a global
+7. inactivación de ítem
+8. rechazo de venta de ítem inactivo
+9. reactivación de ítem
+10. venta exitosa tras reactivar
 
 ## Próximo paso recomendado
-Continuar con endurecimiento y siguientes mejoras:
-- tests automatizados
-- filtros y mantenimiento de catálogo
-- cancelación/reverso más avanzado
-- descuentos/promociones más complejas
-- posible manejo más fino de estados de alquiler para anulaciones futuras
+Continuar con una de estas rutas:
+- tests automatizados del módulo operations
+- cancelaciones/reversos más avanzados
+- mantenimiento adicional de catálogo con ordenamiento o métricas simples
 
 ## Nota para retomar
 Al volver, revisar primero:
 1. que Docker siga levantado
 2. que Prisma esté migrado
 3. que el servidor arranque con `npm run dev`
-4. reprobar smoke tests de fase 1 y fase 2
-5. decidir si el siguiente bloque será tests automatizados o ampliación funcional del catálogo/cancelaciones
+4. reprobar smoke tests de fase 1, fase 2 y mantenimiento de catálogo
+5. decidir si el siguiente bloque será tests automatizados o cancelaciones avanzadas

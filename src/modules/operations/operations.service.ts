@@ -19,7 +19,10 @@ type ListTicketsQuery = {
 };
 
 type ListCatalogItemsQuery = {
+  status?: RecordStatus;
   branchId?: string;
+  type?: CatalogItemType;
+  search?: string;
 };
 
 type CreateCatalogItemInput = {
@@ -27,6 +30,13 @@ type CreateCatalogItemInput = {
   type: CatalogItemType;
   price: number;
   branchId?: string;
+};
+
+type UpdateCatalogItemInput = {
+  name?: string;
+  type?: CatalogItemType;
+  price?: number;
+  branchId?: string | null;
 };
 
 type RentalInput = {
@@ -120,6 +130,51 @@ async function ensureOperationalCompanyAccess(companyId: string, userId: string,
       where: {
         userId,
         role: { in: [MembershipRole.ADMIN_SEDE, MembershipRole.CAJERO, MembershipRole.RECEPCION] },
+        status: RecordStatus.ACTIVE,
+        branch: {
+          companyId,
+          status: RecordStatus.ACTIVE,
+        },
+      },
+      select: { id: true },
+    }),
+  ]);
+
+  if (!companyMembership && !branchMembership) {
+    throw new AppError(403, 'Insufficient permissions');
+  }
+
+  return company;
+}
+
+async function ensureCatalogAdminAccess(companyId: string, userId: string, globalRole: GlobalRole) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, status: true },
+  });
+
+  if (!company || company.status !== RecordStatus.ACTIVE) {
+    throw new AppError(404, 'Company not found');
+  }
+
+  if (globalRole === GlobalRole.SUPERADMIN) {
+    return company;
+  }
+
+  const [companyMembership, branchMembership] = await Promise.all([
+    prisma.companyUser.findFirst({
+      where: {
+        companyId,
+        userId,
+        role: MembershipRole.ADMIN_EMPRESA,
+        status: RecordStatus.ACTIVE,
+      },
+      select: { id: true },
+    }),
+    prisma.branchUser.findFirst({
+      where: {
+        userId,
+        role: MembershipRole.ADMIN_SEDE,
         status: RecordStatus.ACTIVE,
         branch: {
           companyId,
@@ -530,6 +585,32 @@ async function ensureCatalogItemForTicket(tx: PrismaTx, companyId: string, branc
   return catalogItem;
 }
 
+async function ensureCatalogItemInCompany(companyId: string, catalogItemId: string) {
+  const catalogItem = await prisma.saleCatalogItem.findFirst({
+    where: {
+      id: catalogItemId,
+      companyId,
+    },
+    select: {
+      id: true,
+      companyId: true,
+      branchId: true,
+      type: true,
+      name: true,
+      price: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!catalogItem) {
+    throw new AppError(404, 'Catalog item not found');
+  }
+
+  return catalogItem;
+}
+
 async function ensureTicketItemInTicket(tx: PrismaTx, ticketId: string, ticketItemId: string) {
   const ticketItem = await tx.ticketItem.findFirst({
     where: {
@@ -590,7 +671,7 @@ export async function createCatalogItem(
   globalRole: GlobalRole,
   input: CreateCatalogItemInput,
 ) {
-  await ensureOperationalCompanyAccess(companyId, userId, globalRole);
+  await ensureCatalogAdminAccess(companyId, userId, globalRole);
 
   if (input.branchId) {
     await ensureBranchInCompany(companyId, input.branchId);
@@ -634,10 +715,108 @@ export async function listCatalogItems(
   return prisma.saleCatalogItem.findMany({
     where: {
       companyId,
-      status: RecordStatus.ACTIVE,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.type ? { type: query.type } : {}),
+      ...(query.search ? { name: { contains: query.search, mode: 'insensitive' } } : {}),
       ...(query.branchId ? { OR: [{ branchId: null }, { branchId: query.branchId }] } : {}),
     },
     orderBy: [{ branchId: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      id: true,
+      companyId: true,
+      branchId: true,
+      type: true,
+      name: true,
+      price: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function updateCatalogItem(
+  companyId: string,
+  catalogItemId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: UpdateCatalogItemInput,
+) {
+  await ensureCatalogAdminAccess(companyId, userId, globalRole);
+  await ensureCatalogItemInCompany(companyId, catalogItemId);
+
+  if (input.branchId !== undefined && input.branchId !== null) {
+    await ensureBranchInCompany(companyId, input.branchId);
+  }
+
+  return prisma.saleCatalogItem.update({
+    where: { id: catalogItemId },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.type !== undefined ? { type: input.type } : {}),
+      ...(input.price !== undefined ? { price: toDecimal(input.price) } : {}),
+      ...(input.branchId !== undefined ? { branchId: input.branchId } : {}),
+    },
+    select: {
+      id: true,
+      companyId: true,
+      branchId: true,
+      type: true,
+      name: true,
+      price: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function activateCatalogItem(
+  companyId: string,
+  catalogItemId: string,
+  userId: string,
+  globalRole: GlobalRole,
+) {
+  await ensureCatalogAdminAccess(companyId, userId, globalRole);
+  const catalogItem = await ensureCatalogItemInCompany(companyId, catalogItemId);
+
+  if (catalogItem.status === RecordStatus.ACTIVE) {
+    throw new AppError(409, 'Catalog item is already active');
+  }
+
+  return prisma.saleCatalogItem.update({
+    where: { id: catalogItemId },
+    data: { status: RecordStatus.ACTIVE },
+    select: {
+      id: true,
+      companyId: true,
+      branchId: true,
+      type: true,
+      name: true,
+      price: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function deactivateCatalogItem(
+  companyId: string,
+  catalogItemId: string,
+  userId: string,
+  globalRole: GlobalRole,
+) {
+  await ensureCatalogAdminAccess(companyId, userId, globalRole);
+  const catalogItem = await ensureCatalogItemInCompany(companyId, catalogItemId);
+
+  if (catalogItem.status === RecordStatus.INACTIVE) {
+    throw new AppError(409, 'Catalog item is already inactive');
+  }
+
+  return prisma.saleCatalogItem.update({
+    where: { id: catalogItemId },
+    data: { status: RecordStatus.INACTIVE },
     select: {
       id: true,
       companyId: true,

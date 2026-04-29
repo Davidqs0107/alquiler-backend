@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../middlewares/auth.middleware';
 import {
+  activateCatalogItemHandler,
   addCatalogItemToTicketHandler,
   addExtraItemToTicketHandler,
   addManualItemToTicketHandler,
@@ -13,11 +14,13 @@ import {
   createCatalogItemHandler,
   createPaymentHandler,
   createTicketHandler,
+  deactivateCatalogItemHandler,
   finishRentalHandler,
   getTicketDetailHandler,
   listCatalogItemsHandler,
   listTicketsHandler,
   startRentalHandler,
+  updateCatalogItemHandler,
 } from './operations.controller';
 
 export const operationsRouter = Router();
@@ -26,6 +29,9 @@ operationsRouter.use(authMiddleware);
 
 operationsRouter.post('/companies/:companyId/catalog-items', createCatalogItemHandler);
 operationsRouter.get('/companies/:companyId/catalog-items', listCatalogItemsHandler);
+operationsRouter.patch('/companies/:companyId/catalog-items/:catalogItemId', updateCatalogItemHandler);
+operationsRouter.post('/companies/:companyId/catalog-items/:catalogItemId/activate', activateCatalogItemHandler);
+operationsRouter.post('/companies/:companyId/catalog-items/:catalogItemId/deactivate', deactivateCatalogItemHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets', createTicketHandler);
 operationsRouter.get('/companies/:companyId/branches/:branchId/tickets', listTicketsHandler);
 operationsRouter.get('/companies/:companyId/branches/:branchId/tickets/:ticketId', getTicketDetailHandler);

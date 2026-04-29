@@ -12,10 +12,13 @@ import {
   createCatalogItemSchema,
   createPaymentSchema,
   createTicketSchema,
+  deactivateCatalogItemSchema,
   finishRentalSchema,
   listCatalogItemsQuerySchema,
   listTicketsQuerySchema,
   startRentalSchema,
+  updateCatalogItemSchema,
+  activateCatalogItemSchema,
 } from './operations.schemas';
 import * as operationsService from './operations.service';
 
@@ -71,6 +74,58 @@ export async function listCatalogItemsHandler(req: Request, res: Response, next:
     const companyId = String(req.params.companyId);
     const query = listCatalogItemsQuerySchema.parse(req.query);
     const result = await operationsService.listCatalogItems(companyId, req.auth!.userId, req.auth!.globalRole, query);
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateCatalogItemHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const catalogItemId = String(req.params.catalogItemId);
+    const body = updateCatalogItemSchema.parse(req.body);
+    const result = await operationsService.updateCatalogItem(
+      companyId,
+      catalogItemId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function activateCatalogItemHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const catalogItemId = String(req.params.catalogItemId);
+    activateCatalogItemSchema.parse(req.body ?? {});
+    const result = await operationsService.activateCatalogItem(
+      companyId,
+      catalogItemId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function deactivateCatalogItemHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const catalogItemId = String(req.params.catalogItemId);
+    deactivateCatalogItemSchema.parse(req.body ?? {});
+    const result = await operationsService.deactivateCatalogItem(
+      companyId,
+      catalogItemId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+    );
     return res.json(result);
   } catch (error) {
     return next(error);
