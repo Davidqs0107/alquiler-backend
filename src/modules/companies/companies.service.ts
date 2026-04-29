@@ -17,6 +17,72 @@ type CreateCompanyInput = {
   };
 };
 
+type CreateCompanyMemberInput = {
+  email: string;
+  password: string;
+  role: 'ADMIN_EMPRESA' | 'CAJERO' | 'RECEPCION';
+};
+
+type CreateBranchMemberInput = {
+  email: string;
+  password: string;
+  companyRole: 'ADMIN_EMPRESA' | 'CAJERO' | 'RECEPCION';
+  branchRole: 'ADMIN_SEDE' | 'CAJERO' | 'RECEPCION';
+};
+
+async function ensureCompanyAccess(companyId: string, userId: string, globalRole: GlobalRole) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, status: true },
+  });
+
+  if (!company || company.status !== RecordStatus.ACTIVE) {
+    throw new AppError(404, 'Company not found');
+  }
+
+  if (globalRole === GlobalRole.SUPERADMIN) {
+    return company;
+  }
+
+  const membership = await prisma.companyUser.findFirst({
+    where: {
+      companyId,
+      userId,
+      role: MembershipRole.ADMIN_EMPRESA,
+      status: RecordStatus.ACTIVE,
+    },
+    select: { id: true },
+  });
+
+  if (!membership) {
+    throw new AppError(403, 'Insufficient permissions');
+  }
+
+  return company;
+}
+
+async function ensureBranchInCompany(companyId: string, branchId: string) {
+  const branch = await prisma.branch.findFirst({
+    where: {
+      id: branchId,
+      companyId,
+      status: RecordStatus.ACTIVE,
+    },
+    select: {
+      id: true,
+      companyId: true,
+      name: true,
+      status: true,
+    },
+  });
+
+  if (!branch) {
+    throw new AppError(404, 'Branch not found');
+  }
+
+  return branch;
+}
+
 export async function createCompany(input: CreateCompanyInput) {
   const slug = input.company.slug.toLowerCase();
   const adminEmail = input.admin.email.toLowerCase();
@@ -36,7 +102,7 @@ export async function createCompany(input: CreateCompanyInput) {
 
   const passwordHash = await hashPassword(input.admin.password);
 
-  const result = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const adminUser = await tx.user.create({
       data: {
         email: adminEmail,
@@ -97,35 +163,10 @@ export async function createCompany(input: CreateCompanyInput) {
       adminUser,
     };
   });
-
-  return result;
 }
 
 export async function createBranch(companyId: string, userId: string, globalRole: GlobalRole, input: { name: string }) {
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    select: { id: true, status: true },
-  });
-
-  if (!company || company.status !== RecordStatus.ACTIVE) {
-    throw new AppError(404, 'Company not found');
-  }
-
-  if (globalRole !== GlobalRole.SUPERADMIN) {
-    const membership = await prisma.companyUser.findFirst({
-      where: {
-        companyId,
-        userId,
-        role: MembershipRole.ADMIN_EMPRESA,
-        status: RecordStatus.ACTIVE,
-      },
-      select: { id: true },
-    });
-
-    if (!membership) {
-      throw new AppError(403, 'Insufficient permissions');
-    }
-  }
+  await ensureCompanyAccess(companyId, userId, globalRole);
 
   const existingBranch = await prisma.branch.findFirst({
     where: { companyId, name: input.name },
@@ -265,4 +306,203 @@ export async function getCompanyById(companyId: string, userId: string, globalRo
   }
 
   return company;
+}
+
+export async function createCompanyMember(
+  companyId: string,
+  actorUserId: string,
+  actorGlobalRole: GlobalRole,
+  input: CreateCompanyMemberInput,
+) {
+  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
+
+  const email = input.email.toLowerCase();
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+
+  if (existingUser) {
+    throw new AppError(409, 'User email already exists');
+  }
+
+  const passwordHash = await hashPassword(input.password);
+
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        email,
+        passwordHash,
+        globalRole: GlobalRole.USER,
+        status: RecordStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        email: true,
+        globalRole: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    const membership = await tx.companyUser.create({
+      data: {
+        companyId,
+        userId: user.id,
+        role: input.role,
+        status: RecordStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        companyId: true,
+        userId: true,
+        role: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    return { user, companyMembership: membership };
+  });
+}
+
+export async function createBranchMember(
+  companyId: string,
+  branchId: string,
+  actorUserId: string,
+  actorGlobalRole: GlobalRole,
+  input: CreateBranchMemberInput,
+) {
+  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
+  await ensureBranchInCompany(companyId, branchId);
+
+  const email = input.email.toLowerCase();
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+
+  if (existingUser) {
+    throw new AppError(409, 'User email already exists');
+  }
+
+  const passwordHash = await hashPassword(input.password);
+
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        email,
+        passwordHash,
+        globalRole: GlobalRole.USER,
+        status: RecordStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        email: true,
+        globalRole: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    const companyMembership = await tx.companyUser.create({
+      data: {
+        companyId,
+        userId: user.id,
+        role: input.companyRole,
+        status: RecordStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        companyId: true,
+        userId: true,
+        role: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    const branchMembership = await tx.branchUser.create({
+      data: {
+        branchId,
+        userId: user.id,
+        role: input.branchRole,
+        status: RecordStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        branchId: true,
+        userId: true,
+        role: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    return { user, companyMembership, branchMembership };
+  });
+}
+
+export async function listCompanyMembers(companyId: string, actorUserId: string, actorGlobalRole: GlobalRole) {
+  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
+
+  return prisma.companyUser.findMany({
+    where: {
+      companyId,
+      status: RecordStatus.ACTIVE,
+    },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      role: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          globalRole: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+  });
+}
+
+export async function listBranchMembers(
+  companyId: string,
+  branchId: string,
+  actorUserId: string,
+  actorGlobalRole: GlobalRole,
+) {
+  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
+  await ensureBranchInCompany(companyId, branchId);
+
+  return prisma.branchUser.findMany({
+    where: {
+      branchId,
+      status: RecordStatus.ACTIVE,
+    },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      role: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          globalRole: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+  });
 }
