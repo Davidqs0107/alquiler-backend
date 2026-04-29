@@ -8,6 +8,7 @@ import {
   applyTicketItemDiscountSchema,
   cancelTicketItemSchema,
   cancelTicketSchema,
+  cancelWithReversalSchema,
   closeTicketSchema,
   createCatalogItemSchema,
   createPaymentSchema,
@@ -295,6 +296,26 @@ export async function cancelTicketHandler(req: Request, res: Response, next: Nex
     const ticketId = String(req.params.ticketId);
     const body = cancelTicketSchema.parse(req.body);
     const result = await operationsService.cancelTicket(
+      companyId,
+      branchId,
+      ticketId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function cancelTicketWithReversalHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const ticketId = String(req.params.ticketId);
+    const body = cancelWithReversalSchema.parse(req.body);
+    const result = await operationsService.cancelTicketWithReversal(
       companyId,
       branchId,
       ticketId,

@@ -63,16 +63,17 @@ enum PaymentMethod {
 }
 
 model User {
-  id                 String        @id @default(cuid())
-  email              String        @unique
-  passwordHash       String
-  globalRole         GlobalRole    @default(USER)
-  status             RecordStatus  @default(ACTIVE)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  id               String            @id @default(cuid())
+  email            String            @unique
+  passwordHash     String
+  globalRole       GlobalRole        @default(USER)
+  status           RecordStatus      @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
   companyMemberships CompanyUser[]
   branchMemberships  BranchUser[]
-  openedTickets      Ticket[]      @relation("TicketOpenedBy")
+  openedTickets      Ticket[]        @relation("TicketOpenedBy")
+  paymentReversals   PaymentReversal[] @relation("PaymentReversalCreatedBy")
 }
 
 model Company {
@@ -91,6 +92,7 @@ model Company {
   tickets                    Ticket[]
   catalogItems               SaleCatalogItem[]
   payments                   Payment[]
+  paymentReversals           PaymentReversal[]
   rentalSessions             RentalSession[]
 }
 
@@ -259,6 +261,7 @@ model Ticket {
   openedBy           User         @relation("TicketOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
   items              TicketItem[]
   payments           Payment[]
+  paymentReversals   PaymentReversal[]
 
   @@unique([branchId, ticketNumber])
   @@index([companyId])
@@ -319,19 +322,40 @@ model RentalSession {
 }
 
 model Payment {
-  id        String        @id @default(cuid())
-  companyId String
-  ticketId  String
-  method    PaymentMethod
-  amount    Decimal       @db.Decimal(12, 2)
-  notes     String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  ticket    Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  id             String           @id @default(cuid())
+  companyId      String
+  ticketId       String
+  method         PaymentMethod
+  amount         Decimal          @db.Decimal(12, 2)
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ticket         Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  paymentReversal PaymentReversal?
 
   @@index([companyId])
   @@index([ticketId])
+}
+
+model PaymentReversal {
+  id          String   @id @default(cuid())
+  companyId   String
+  ticketId    String
+  paymentId   String   @unique
+  amount      Decimal  @db.Decimal(12, 2)
+  reason      String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  payment     Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation("PaymentReversalCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([companyId])
+  @@index([ticketId])
+  @@index([createdById])
 }
 
 model SaleCatalogItem {

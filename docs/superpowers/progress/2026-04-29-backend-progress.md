@@ -78,6 +78,11 @@ El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correc
 - activar/inactivar catálogo
 - listar catálogo con filtros por `status`, `branchId`, `type` y búsqueda por nombre
 
+### 7. Cancelación avanzada con reversos
+- cancelar ticket completo con pagos
+- generar reverso por cada pago asociado
+- exponer lectura financiera con `paidGrossTotal`, `reversedTotal` y `paidNetTotal`
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -98,6 +103,9 @@ El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correc
 - catálogo se puede editar sin romper historial de ventas
 - catálogo se puede activar/inactivar sin borrar trazabilidad
 - listado de catálogo soporta filtros por estado, sede, tipo y búsqueda textual
+- cancelación avanzada de ticket con pagos crea reversos dedicados por pago
+- pagos originales se preservan y no se mutan para reversar
+- lectura financiera del ticket distingue pagado bruto, reversado y pagado neto
 - `SUPERADMIN`, `ADMIN_EMPRESA`, `ADMIN_SEDE`, `CAJERO` y `RECEPCION` operan el módulo operacional según alcance
 
 ## Archivos clave
@@ -127,35 +135,33 @@ El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correc
 - `docs/superpowers/specs/2026-04-29-tickets-rentals-payments-design.md`
 - `docs/superpowers/specs/2026-04-29-sales-manual-extras-discounts-cancellations-design.md`
 - `docs/superpowers/specs/2026-04-29-catalog-maintenance-design.md`
+- `docs/superpowers/specs/2026-04-29-ticket-cancellation-with-payment-reversals-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó el mantenimiento de catálogo con:
-- edición de `SaleCatalogItem`
-- activación e inactivación
-- filtros por `status`, `branchId`, `type` y `search`
+Se diseñó, implementó y validó la cancelación avanzada de tickets con pagos mediante reversos dedicados.
+
+Se agregó nueva migración Prisma con `PaymentReversal` y se actualizaron las lecturas financieras del ticket.
 
 Se hizo smoke test manual exitoso cubriendo:
-1. creación de catálogo global y por sede
-2. listado general
-3. listado filtrado por sede
-4. listado filtrado por tipo
-5. búsqueda por nombre
-6. edición de nombre, precio y cambio de alcance a global
-7. inactivación de ítem
-8. rechazo de venta de ítem inactivo
-9. reactivación de ítem
-10. venta exitosa tras reactivar
+1. apertura de ticket
+2. agregado de línea manual
+3. registro de pago
+4. cancelación con reverso
+5. creación de reverso por cada pago
+6. ticket en estado `CANCELLED`
+7. lectura correcta de `paidGrossTotal`, `reversedTotal` y `paidNetTotal`
+8. rechazo de segunda cancelación sobre el mismo ticket
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
 - tests automatizados del módulo operations
-- cancelaciones/reversos más avanzados
-- mantenimiento adicional de catálogo con ordenamiento o métricas simples
+- reversos parciales o por pago individual en una fase posterior
+- cancelación avanzada de alquileres ya iniciados/finalizados
 
 ## Nota para retomar
 Al volver, revisar primero:
 1. que Docker siga levantado
 2. que Prisma esté migrado
 3. que el servidor arranque con `npm run dev`
-4. reprobar smoke tests de fase 1, fase 2 y mantenimiento de catálogo
-5. decidir si el siguiente bloque será tests automatizados o cancelaciones avanzadas
+4. reprobar smoke tests de fase 1, fase 2, mantenimiento de catálogo y reversos
+5. decidir si el siguiente bloque será tests automatizados o cancelaciones operativas más avanzadas

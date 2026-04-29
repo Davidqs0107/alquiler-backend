@@ -192,6 +192,11 @@ async function ensureCatalogAdminAccess(companyId: string, userId: string, globa
   return company;
 }
 
+async function ensureSensitiveTicketActionAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
+  await ensureCatalogAdminAccess(companyId, userId, globalRole);
+  return ensureBranchInCompany(companyId, branchId);
+}
+
 async function ensureOperationsAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
   await ensureOperationalCompanyAccess(companyId, userId, globalRole);
   return ensureBranchInCompany(companyId, branchId);
@@ -446,13 +451,35 @@ async function recalculateTicketTotals(tx: PrismaTx, ticketId: string) {
   });
 }
 
-async function getTicketPaidTotal(tx: PrismaTx, ticketId: string) {
+async function getTicketPaidGrossTotal(tx: PrismaTx, ticketId: string) {
   const aggregate = await tx.payment.aggregate({
     where: { ticketId },
     _sum: { amount: true },
   });
 
   return decimalToNumber(aggregate._sum.amount);
+}
+
+async function getTicketReversedTotal(tx: PrismaTx, ticketId: string) {
+  const aggregate = await tx.paymentReversal.aggregate({
+    where: { ticketId },
+    _sum: { amount: true },
+  });
+
+  return decimalToNumber(aggregate._sum.amount);
+}
+
+async function getTicketFinancialSummary(tx: PrismaTx, ticketId: string) {
+  const [paidGrossTotal, reversedTotal] = await Promise.all([
+    getTicketPaidGrossTotal(tx, ticketId),
+    getTicketReversedTotal(tx, ticketId),
+  ]);
+
+  return {
+    paidGrossTotal,
+    reversedTotal,
+    paidNetTotal: Math.max(paidGrossTotal - reversedTotal, 0),
+  };
 }
 
 async function buildTicketSummary(tx: PrismaTx, ticketId: string) {
@@ -465,13 +492,14 @@ async function buildTicketSummary(tx: PrismaTx, ticketId: string) {
     throw new AppError(404, 'Ticket not found');
   }
 
-  const paidTotal = await getTicketPaidTotal(tx, ticketId);
+  const totals = await getTicketFinancialSummary(tx, ticketId);
   const total = decimalToNumber(ticket.total);
 
   return {
     ...ticket,
-    paidTotal,
-    pendingAmount: Math.max(total - paidTotal, 0),
+    ...totals,
+    paidTotal: totals.paidNetTotal,
+    pendingAmount: Math.max(total - totals.paidNetTotal, 0),
   };
 }
 
@@ -871,18 +899,35 @@ export async function listTickets(
     orderBy: [{ openedAt: 'desc' }, { ticketNumber: 'desc' }],
     select: {
       ...ticketSummarySelect,
-      payments: { select: { amount: true } },
+      payments: {
+        select: {
+          amount: true,
+          paymentReversal: {
+            select: {
+              amount: true,
+            },
+          },
+        },
+      },
     },
   });
 
   return tickets.map((ticket) => {
-    const paidTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
+    const paidGrossTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
+    const reversedTotal = ticket.payments.reduce(
+      (sum, payment) => sum + decimalToNumber(payment.paymentReversal?.amount),
+      0,
+    );
+    const paidNetTotal = Math.max(paidGrossTotal - reversedTotal, 0);
     const total = decimalToNumber(ticket.total);
 
     return {
       ...ticket,
-      paidTotal,
-      pendingAmount: Math.max(total - paidTotal, 0),
+      paidGrossTotal,
+      reversedTotal,
+      paidNetTotal,
+      paidTotal: paidNetTotal,
+      pendingAmount: Math.max(total - paidNetTotal, 0),
     };
   });
 }
@@ -918,6 +963,28 @@ export async function getTicketDetail(
           notes: true,
           createdAt: true,
           updatedAt: true,
+          paymentReversal: {
+            select: {
+              id: true,
+              amount: true,
+              reason: true,
+              createdById: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+        },
+      },
+      paymentReversals: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          paymentId: true,
+          amount: true,
+          reason: true,
+          createdById: true,
+          createdAt: true,
+          updatedAt: true,
         },
       },
     },
@@ -927,13 +994,18 @@ export async function getTicketDetail(
     throw new AppError(404, 'Ticket not found');
   }
 
-  const paidTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
+  const paidGrossTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
+  const reversedTotal = ticket.paymentReversals.reduce((sum, reversal) => sum + decimalToNumber(reversal.amount), 0);
+  const paidNetTotal = Math.max(paidGrossTotal - reversedTotal, 0);
   const total = decimalToNumber(ticket.total);
 
   return {
     ...ticket,
-    paidTotal,
-    pendingAmount: Math.max(total - paidTotal, 0),
+    paidGrossTotal,
+    reversedTotal,
+    paidNetTotal,
+    paidTotal: paidNetTotal,
+    pendingAmount: Math.max(total - paidNetTotal, 0),
   };
 }
 
@@ -1415,9 +1487,9 @@ export async function createPayment(
     const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
     ensureTicketOpen(ticket);
 
-    const paidTotal = await getTicketPaidTotal(tx, ticketId);
+    const financials = await getTicketFinancialSummary(tx, ticketId);
     const ticketTotal = decimalToNumber(ticket.total);
-    const pendingAmount = ticketTotal - paidTotal;
+    const pendingAmount = ticketTotal - financials.paidNetTotal;
 
     if (input.amount > pendingAmount + 0.000001) {
       throw new AppError(409, 'Payment exceeds pending amount');
@@ -1443,12 +1515,16 @@ export async function createPayment(
       },
     });
 
-    const updatedPaidTotal = paidTotal + input.amount;
+    const paidGrossTotal = financials.paidGrossTotal + input.amount;
+    const paidNetTotal = paidGrossTotal - financials.reversedTotal;
 
     return {
       payment,
-      paidTotal: updatedPaidTotal,
-      pendingAmount: Math.max(ticketTotal - updatedPaidTotal, 0),
+      paidGrossTotal,
+      reversedTotal: financials.reversedTotal,
+      paidNetTotal,
+      paidTotal: paidNetTotal,
+      pendingAmount: Math.max(ticketTotal - paidNetTotal, 0),
     };
   });
 }
@@ -1480,8 +1556,8 @@ export async function closeTicket(
       throw new AppError(409, 'Ticket has active rental sessions');
     }
 
-    const paidTotal = await getTicketPaidTotal(tx, ticketId);
-    const pendingAmount = decimalToNumber(ticket.total) - paidTotal;
+    const financials = await getTicketFinancialSummary(tx, ticketId);
+    const pendingAmount = decimalToNumber(ticket.total) - financials.paidNetTotal;
 
     if (!isZero(pendingAmount)) {
       throw new AppError(409, 'Ticket has pending amount');
@@ -1495,5 +1571,105 @@ export async function closeTicket(
       },
       select: ticketSummarySelect,
     });
+  });
+}
+
+export async function cancelTicketWithReversal(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: CancelInput,
+) {
+  await ensureSensitiveTicketActionAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
+    ensureTicketOpen(ticket);
+
+    const payments = await tx.payment.findMany({
+      where: { ticketId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        companyId: true,
+        ticketId: true,
+        method: true,
+        amount: true,
+        notes: true,
+        createdAt: true,
+        updatedAt: true,
+        paymentReversal: {
+          select: { id: true },
+        },
+      },
+    });
+
+    if (payments.length === 0) {
+      throw new AppError(409, 'Ticket has no payments to reverse in this flow');
+    }
+
+    if (payments.some((payment) => payment.paymentReversal)) {
+      throw new AppError(409, 'At least one payment already has a reversal');
+    }
+
+    const now = new Date();
+
+    const paymentReversals = await Promise.all(
+      payments.map((payment) =>
+        tx.paymentReversal.create({
+          data: {
+            companyId,
+            ticketId,
+            paymentId: payment.id,
+            amount: payment.amount,
+            reason: input.reason,
+            createdById: userId,
+          },
+          select: {
+            id: true,
+            companyId: true,
+            ticketId: true,
+            paymentId: true,
+            amount: true,
+            reason: true,
+            createdById: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        }),
+      ),
+    );
+
+    await tx.ticketItem.updateMany({
+      where: {
+        ticketId,
+        cancelledAt: null,
+      },
+      data: {
+        cancelledAt: now,
+        cancellationReason: `Ticket cancelled with reversal: ${input.reason}`,
+      },
+    });
+
+    const cancelledTicket = await tx.ticket.update({
+      where: { id: ticketId },
+      data: {
+        status: TicketStatus.CANCELLED,
+        cancelledAt: now,
+        cancellationReason: input.reason,
+      },
+      select: ticketSummarySelect,
+    });
+
+    const totals = await getTicketFinancialSummary(tx, ticketId);
+
+    return {
+      ticket: cancelledTicket,
+      payments: payments.map(({ paymentReversal, ...payment }) => payment),
+      paymentReversals,
+      totals,
+    };
   });
 }
