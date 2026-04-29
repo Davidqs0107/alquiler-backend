@@ -1,0 +1,18 @@
+import express from 'express';
+import { healthRouter } from './modules/health/health.routes';
+import { authRouter } from './modules/auth/auth.routes';
+import { errorMiddleware, notFoundMiddleware } from './middlewares/error.middleware';
+
+export function createApp() {
+  const app = express();
+
+  app.use(express.json());
+
+  app.use('/health', healthRouter);
+  app.use('/auth', authRouter);
+
+  app.use(notFoundMiddleware);
+  app.use(errorMiddleware);
+
+  return app;
+}
