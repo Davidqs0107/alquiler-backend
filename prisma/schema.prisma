@@ -76,37 +76,39 @@ model User {
 }
 
 model Company {
-  id                 String             @id @default(cuid())
-  name               String
-  slug               String             @unique
-  status             RecordStatus       @default(ACTIVE)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  branches           Branch[]
-  users              CompanyUser[]
-  resourceCategories ResourceCategory[]
-  resources          Resource[]
-  ratePlans          RatePlan[]
-  tickets            Ticket[]
-  catalogItems       SaleCatalogItem[]
-  payments           Payment[]
-  rentalSessions     RentalSession[]
+  id                         String                     @id @default(cuid())
+  name                       String
+  slug                       String                     @unique
+  status                     RecordStatus               @default(ACTIVE)
+  createdAt                  DateTime                   @default(now())
+  updatedAt                  DateTime                   @updatedAt
+  branches                   Branch[]
+  users                      CompanyUser[]
+  resourceCategories         ResourceCategory[]
+  branchCategoryVisibilities BranchCategoryVisibility[]
+  resources                  Resource[]
+  ratePlans                  RatePlan[]
+  tickets                    Ticket[]
+  catalogItems               SaleCatalogItem[]
+  payments                   Payment[]
+  rentalSessions             RentalSession[]
 }
 
 model Branch {
-  id           String            @id @default(cuid())
-  companyId    String
-  name         String
-  status       RecordStatus      @default(ACTIVE)
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  company      Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  users        BranchUser[]
-  resources    Resource[]
-  ratePlans    RatePlan[]
-  tickets      Ticket[]
-  sessions     RentalSession[]
-  catalogItems SaleCatalogItem[]
+  id                          String                     @id @default(cuid())
+  companyId                   String
+  name                        String
+  status                      RecordStatus               @default(ACTIVE)
+  createdAt                   DateTime                   @default(now())
+  updatedAt                   DateTime                   @updatedAt
+  company                     Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users                       BranchUser[]
+  resources                   Resource[]
+  ratePlans                   RatePlan[]
+  tickets                     Ticket[]
+  sessions                    RentalSession[]
+  catalogItems                SaleCatalogItem[]
+  categoryVisibilityOverrides BranchCategoryVisibility[]
 
   @@unique([companyId, name])
   @@index([companyId])
@@ -145,18 +147,36 @@ model BranchUser {
 }
 
 model ResourceCategory {
-  id        String       @id @default(cuid())
-  companyId String
-  name      String
-  status    RecordStatus @default(ACTIVE)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  resources Resource[]
-  ratePlans RatePlan[]
+  id                  String                     @id @default(cuid())
+  companyId           String
+  name                String
+  status              RecordStatus               @default(ACTIVE)
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  company             Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  resources           Resource[]
+  ratePlans           RatePlan[]
+  visibilityOverrides BranchCategoryVisibility[]
 
   @@unique([companyId, name])
   @@index([companyId])
+}
+
+model BranchCategoryVisibility {
+  id                 String           @id @default(cuid())
+  companyId          String
+  branchId           String
+  resourceCategoryId String
+  isVisible          Boolean
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  company            Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch             Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  resourceCategory   ResourceCategory @relation(fields: [resourceCategoryId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, resourceCategoryId])
+  @@index([companyId])
+  @@index([companyId, branchId])
 }
 
 model Resource {
