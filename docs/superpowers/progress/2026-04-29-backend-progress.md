@@ -96,6 +96,11 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - smoke tests HTTP para creación de ticket, pagos y cancelación con reversos
 - helpers reutilizables de cleanup y factories para tests
 
+### 9. Tests automatizados fase 2 de permisos
+- boundaries de permisos para operaciones normales vs acciones sensibles
+- cobertura service para `CAJERO`, `RECEPCION`, `ADMIN_EMPRESA`, `ADMIN_SEDE` y usuario sin membresía
+- smoke tests HTTP de permisos para endpoint normal y endpoint sensible
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -153,31 +158,31 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-29-catalog-maintenance-design.md`
 - `docs/superpowers/specs/2026-04-29-ticket-cancellation-with-payment-reversals-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-tests-phase1-design.md`
+- `docs/superpowers/specs/2026-04-30-operations-permissions-tests-phase2-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la primera tanda de tests automatizados del módulo `operations`.
+Se diseñó, implementó y validó la segunda tanda corta de tests automatizados para permisos del módulo `operations`.
 
-Se agregó:
-- script `npm test`
-- suites en `tests/operations.service.test.ts` y `tests/operations.http.test.ts`
-- cleanup centralizado de DB en `tests/helpers/db.ts`
-- factories reutilizables en `tests/helpers/factories.ts`
+Se agregó cobertura para diferenciar correctamente:
+- operaciones normales
+- acciones sensibles como cancelación con reverso
 
-La suite automatizada quedó validada exitosamente cubriendo:
-1. rechazo de alquiler con solapamiento activo
-2. rechazo de pago por encima del pendiente
-3. rechazo de cierre con saldo pendiente
-4. rechazo de cierre con sesión activa
-5. rechazo de segunda cancelación con reverso
-6. rechazo de cancelación simple en tickets con pagos
-7. creación HTTP de ticket
-8. registro HTTP de pago
-9. cancelación HTTP con reversos
-10. compilación correcta con `npm run build`
+La suite automatizada quedó validada exitosamente cubriendo además:
+1. `CAJERO` puede crear ticket
+2. `RECEPCION` puede crear ticket
+3. usuario sin membresía no puede crear ticket
+4. `ADMIN_EMPRESA` puede cancelar con reverso
+5. `ADMIN_SEDE` puede cancelar con reverso
+6. `CAJERO` no puede cancelar con reverso
+7. `RECEPCION` no puede cancelar con reverso
+8. endpoint normal acepta `CAJERO`
+9. endpoint sensible rechaza `CAJERO`
+10. endpoint sensible acepta `ADMIN_SEDE`
+11. compilación correcta con `npm run build`
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- ampliar cobertura automatizada a happy paths completos y permisos
+- ampliar cobertura automatizada a happy paths completos
 - reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
 

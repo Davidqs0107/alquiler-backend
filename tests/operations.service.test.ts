@@ -10,8 +10,10 @@ import {
   createResource,
   createResourceCategory,
   createUser,
+  grantBranchMembership,
+  grantCompanyMembership,
 } from './helpers/factories';
-import { GlobalRole, PaymentMethod } from '@prisma/client';
+import { GlobalRole, MembershipRole, PaymentMethod } from '@prisma/client';
 
 async function createOperationsContext() {
   const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
@@ -151,6 +153,111 @@ describe('operations service critical rules', () => {
         reason: 'Should fail',
       }),
       (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+});
+
+async function createPermissionContext() {
+  const owner = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+  const company = await createCompany();
+  const branch = await createBranch({ companyId: company.id });
+  const ticket = await operationsService.createTicket(company.id, branch.id, owner.id, owner.globalRole);
+
+  await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, owner.id, owner.globalRole, {
+    description: 'Manual item',
+    quantity: 1,
+    unitPrice: 100,
+  });
+
+  await operationsService.createPayment(company.id, branch.id, ticket.id, owner.id, owner.globalRole, {
+    method: PaymentMethod.CASH,
+    amount: 100,
+  });
+
+  return { company, branch, ticket };
+}
+
+describe('operations service permissions', () => {
+  it('allows CAJERO to create a ticket', async () => {
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const user = await createUser();
+    await grantCompanyMembership({ companyId: company.id, userId: user.id, role: MembershipRole.CAJERO });
+
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    assert.equal(ticket.status, 'OPEN');
+  });
+
+  it('allows RECEPCION to create a ticket', async () => {
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const user = await createUser();
+    await grantBranchMembership({ branchId: branch.id, userId: user.id, role: MembershipRole.RECEPCION });
+
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    assert.equal(ticket.status, 'OPEN');
+  });
+
+  it('rejects creating a ticket without membership', async () => {
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const user = await createUser();
+
+    await assert.rejects(
+      operationsService.createTicket(company.id, branch.id, user.id, user.globalRole),
+      (error: unknown) => error instanceof AppError && error.statusCode === 403,
+    );
+  });
+
+  it('allows ADMIN_EMPRESA to cancel with reversal', async () => {
+    const { company, branch, ticket } = await createPermissionContext();
+    const user = await createUser();
+    await grantCompanyMembership({ companyId: company.id, userId: user.id, role: MembershipRole.ADMIN_EMPRESA });
+
+    const result = await operationsService.cancelTicketWithReversal(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      reason: 'Admin company cancel',
+    });
+
+    assert.equal(result.ticket.status, 'CANCELLED');
+  });
+
+  it('allows ADMIN_SEDE to cancel with reversal', async () => {
+    const { company, branch, ticket } = await createPermissionContext();
+    const user = await createUser();
+    await grantBranchMembership({ branchId: branch.id, userId: user.id, role: MembershipRole.ADMIN_SEDE });
+
+    const result = await operationsService.cancelTicketWithReversal(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      reason: 'Admin branch cancel',
+    });
+
+    assert.equal(result.ticket.status, 'CANCELLED');
+  });
+
+  it('rejects CAJERO for cancel with reversal', async () => {
+    const { company, branch, ticket } = await createPermissionContext();
+    const user = await createUser();
+    await grantCompanyMembership({ companyId: company.id, userId: user.id, role: MembershipRole.CAJERO });
+
+    await assert.rejects(
+      operationsService.cancelTicketWithReversal(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+        reason: 'Cashier should fail',
+      }),
+      (error: unknown) => error instanceof AppError && error.statusCode === 403,
+    );
+  });
+
+  it('rejects RECEPCION for cancel with reversal', async () => {
+    const { company, branch, ticket } = await createPermissionContext();
+    const user = await createUser();
+    await grantBranchMembership({ branchId: branch.id, userId: user.id, role: MembershipRole.RECEPCION });
+
+    await assert.rejects(
+      operationsService.cancelTicketWithReversal(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+        reason: 'Reception should fail',
+      }),
+      (error: unknown) => error instanceof AppError && error.statusCode === 403,
     );
   });
 });

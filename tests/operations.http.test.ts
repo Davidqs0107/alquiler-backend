@@ -2,11 +2,17 @@ import './setup';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import request from 'supertest';
-import { PaymentMethod, GlobalRole } from '@prisma/client';
+import { PaymentMethod, GlobalRole, MembershipRole } from '@prisma/client';
 import { createApp } from '../src/app';
 import * as operationsService from '../src/modules/operations/operations.service';
 import { signAccessToken } from '../src/utils/jwt';
-import { createBranch, createCompany, createUser } from './helpers/factories';
+import {
+  createBranch,
+  createCompany,
+  createUser,
+  grantBranchMembership,
+  grantCompanyMembership,
+} from './helpers/factories';
 
 function authHeaderFor(user: { id: string; email: string; globalRole: GlobalRole }) {
   const token = signAccessToken({
@@ -95,5 +101,81 @@ describe('operations http smoke', () => {
     assert.equal(response.body.totals.paidNetTotal, 0);
     assert.equal(response.body.paymentReversals.length, 1);
     assert.ok(response.body.paymentReversals[0].id);
+  });
+});
+
+describe('operations http permissions', () => {
+  it('allows CAJERO on a normal endpoint', async () => {
+    const app = createApp();
+    const user = await createUser();
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    await grantCompanyMembership({ companyId: company.id, userId: user.id, role: MembershipRole.CAJERO });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets`)
+      .set('Authorization', authHeaderFor(user))
+      .send({});
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.status, 'OPEN');
+  });
+
+  it('rejects CAJERO on a sensitive endpoint', async () => {
+    const app = createApp();
+    const owner = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const actor = await createUser();
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    await grantCompanyMembership({ companyId: company.id, userId: actor.id, role: MembershipRole.CAJERO });
+    const ticket = await operationsService.createTicket(company.id, branch.id, owner.id, owner.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, owner.id, owner.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, owner.id, owner.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 100,
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticket.id}/cancel-with-reversal`)
+      .set('Authorization', authHeaderFor(actor))
+      .send({ reason: 'Cashier should fail' });
+
+    assert.equal(response.status, 403);
+    assert.equal(response.body.message, 'Insufficient permissions');
+  });
+
+  it('allows ADMIN_SEDE on a sensitive endpoint', async () => {
+    const app = createApp();
+    const owner = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const actor = await createUser();
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    await grantBranchMembership({ branchId: branch.id, userId: actor.id, role: MembershipRole.ADMIN_SEDE });
+    const ticket = await operationsService.createTicket(company.id, branch.id, owner.id, owner.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, owner.id, owner.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, owner.id, owner.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 100,
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticket.id}/cancel-with-reversal`)
+      .set('Authorization', authHeaderFor(actor))
+      .send({ reason: 'Branch admin allowed' });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ticket.status, 'CANCELLED');
   });
 });
