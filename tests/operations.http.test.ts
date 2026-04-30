@@ -172,6 +172,61 @@ describe('operations http rental happy path', () => {
   });
 });
 
+describe('operations http discounts', () => {
+  it('recalculates line discount through endpoint', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    const added = await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticket.id}/items/${added.ticketItem.id}/discount`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ discountAmount: 20, reason: 'Promo' });
+
+    assert.equal(response.status, 200);
+    assert.equal(Number(response.body.ticketItem.discountAmount), 20);
+    assert.equal(Number(response.body.ticketItem.subtotal), 80);
+    assert.equal(Number(response.body.ticket.total), 80);
+  });
+
+  it('recalculates global discount through endpoint', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item 1',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item 2',
+      quantity: 1,
+      unitPrice: 50,
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticket.id}/discount`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ discountAmount: 30, reason: 'Global promo' });
+
+    assert.equal(response.status, 200);
+    assert.equal(Number(response.body.ticket.discountAmount), 30);
+    assert.equal(Number(response.body.ticket.total), 120);
+  });
+});
+
 describe('operations http rental overtime', () => {
   it('recalculates overtime for TIME_UNIT rentals through endpoints', async () => {
     const app = createApp();

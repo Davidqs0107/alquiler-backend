@@ -227,6 +227,107 @@ describe('operations service rental happy path', () => {
   });
 });
 
+describe('operations service discounts', () => {
+  it('recalculates ticket totals after line discount', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    const added = await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    const discounted = await operationsService.applyTicketItemDiscount(
+      company.id,
+      branch.id,
+      ticket.id,
+      added.ticketItem.id,
+      user.id,
+      user.globalRole,
+      { discountAmount: 20, reason: 'Promo' },
+    );
+
+    assert.equal(Number(discounted.ticketItem.discountAmount), 20);
+    assert.equal(Number(discounted.ticketItem.subtotal), 80);
+    assert.equal(Number(discounted.ticket.total), 80);
+  });
+
+  it('recalculates ticket totals after global discount', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item 1',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item 2',
+      quantity: 1,
+      unitPrice: 50,
+    });
+
+    const discounted = await operationsService.applyTicketDiscount(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      discountAmount: 30,
+      reason: 'Global promo',
+    });
+
+    assert.equal(Number(discounted.ticket.discountAmount), 30);
+    assert.equal(Number(discounted.ticket.total), 120);
+  });
+
+  it('rejects line discount greater than item subtotal', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    const added = await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await assert.rejects(
+      operationsService.applyTicketItemDiscount(
+        company.id,
+        branch.id,
+        ticket.id,
+        added.ticketItem.id,
+        user.id,
+        user.globalRole,
+        { discountAmount: 120, reason: 'Too much' },
+      ),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+
+  it('rejects global discount greater than active ticket subtotal', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item 1',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item 2',
+      quantity: 1,
+      unitPrice: 50,
+    });
+
+    await assert.rejects(
+      operationsService.applyTicketDiscount(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+        discountAmount: 200,
+        reason: 'Too much',
+      }),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+});
+
 describe('operations service rental overtime', () => {
   it('recalculates overtime for TIME_UNIT rentals rounding up extra block', async () => {
     const { user, company, branch, resource } = await createOperationsContext();

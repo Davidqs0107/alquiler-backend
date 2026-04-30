@@ -111,6 +111,11 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - validación de redondeo hacia arriba para bloque extra
 - recálculo correcto de `usedMinutes`, `overtimeMinutes`, `overtimeAmount` y `ticket.total`
 
+### 12. Tests automatizados fase 5 descuentos
+- descuentos por línea y globales cubiertos en service y HTTP
+- validación de recálculo de subtotales, `discountAmount` y `ticket.total`
+- cobertura de rechazos cuando el descuento excede lo permitido
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -171,29 +176,30 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-30-operations-permissions-tests-phase2-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-rental-happy-path-tests-phase3-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-rental-overtime-tests-phase4-design.md`
+- `docs/superpowers/specs/2026-04-30-operations-discounts-tests-phase5-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la cuarta tanda corta de tests automatizados para overtime de alquiler.
+Se diseñó, implementó y validó la quinta tanda corta de tests automatizados para descuentos del módulo `operations`.
 
-Se agregó cobertura para overtime con `TIME_UNIT` y redondeo hacia arriba usando:
-- reserva de 60 minutos
-- uso real de 90 minutos
-- `basePrice = 100`
-- `timeUnitMinutes = 60`
+Se agregó cobertura para:
+- descuento por línea
+- descuento global del ticket
+- rechazos por exceder límites permitidos
 
 La suite automatizada quedó validada exitosamente cubriendo además:
-1. `usedMinutes = 90`
-2. `overtimeMinutes = 30`
-3. `baseAmount = 100`
-4. `overtimeAmount = 100`
-5. `totalAmount = 200`
-6. `ticket.total = 200`
-7. validación completa por HTTP del mismo caso
-8. compilación correcta con `npm run build`
+1. descuento por línea recalcula `ticketItem.subtotal`
+2. descuento por línea recalcula `ticket.total`
+3. descuento global recalcula `ticket.discountAmount`
+4. descuento global recalcula `ticket.total`
+5. rechazo de descuento por línea mayor al subtotal bruto
+6. rechazo de descuento global mayor al subtotal activo del ticket
+7. validación HTTP del endpoint de descuento por línea
+8. validación HTTP del endpoint de descuento global
+9. compilación correcta con `npm run build`
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- ampliar cobertura automatizada a ticket manual/catalog/extras y descuentos
+- ampliar cobertura automatizada a happy path de ticket manual/catalog/extras
 - reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
 
