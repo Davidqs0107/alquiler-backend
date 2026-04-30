@@ -91,6 +91,7 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - exponer lectura financiera con `paidGrossTotal`, `reversedTotal` y `paidNetTotal`
 - reversos parciales por pago específico
 - múltiples reversos parciales por pago hasta agotar remanente reversible
+- cancelación avanzada de sesiones de alquiler con reversos automáticos FIFO
 
 ### 8. Tests automatizados fase 1
 - runner de tests con `tsx --test`
@@ -200,24 +201,26 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-30-operations-simple-cancellations-tests-phase7-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-catalog-filters-tests-phase8-design.md`
 - `docs/superpowers/specs/2026-04-30-partial-payment-reversals-design.md`
+- `docs/superpowers/specs/2026-04-30-rental-session-cancellation-with-reversals-design.md`
 
 ## Último punto alcanzado
-Se diseñó e implementó soporte para reversos parciales por pago específico.
+Se diseñó e implementó la cancelación avanzada de sesiones de alquiler con reversos automáticos FIFO.
 
 Se agregó:
-- migración Prisma para permitir múltiples `PaymentReversal` por `paymentId`
-- endpoint `POST /companies/:companyId/branches/:branchId/tickets/:ticketId/payments/:paymentId/reversals`
-- validación de remanente reversible por pago
-- actualización de lecturas financieras para sumar múltiples reversos por pago
-- adaptación de cancelación completa para reversar sólo el remanente faltante de cada pago
+- endpoint `POST /companies/:companyId/branches/:branchId/rentals/:rentalSessionId/cancel`
+- cancelación de sesiones `RESERVED` y `FINISHED`
+- cancelación lógica de `RentalSession` y `TicketItem`
+- cálculo del neto cancelable de la línea rental
+- reversos automáticos sobre pagos reversables del ticket en orden FIFO
+- rechazo si no existe saldo reversible suficiente
 
 La implementación quedó compilando correctamente con `npm run build`.
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- cancelación avanzada de alquileres ya iniciados/finalizados
 - edición y activación/inactivación de catálogo
-- bloque final de tests automatizados para reversos parciales y cierre de cobertura
+- bloque final de tests automatizados para reversos parciales, cancelación de rentals y cierre de cobertura
+- mejoras operativas posteriores según feedback funcional
 
 ## Nota para retomar
 Al volver, revisar primero:

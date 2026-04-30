@@ -10,6 +10,7 @@ import {
   applyTicketItemDiscountHandler,
   cancelTicketHandler,
   cancelTicketItemHandler,
+  cancelRentalSessionHandler,
   cancelTicketWithReversalHandler,
   closeTicketHandler,
   createCatalogItemHandler,
@@ -47,6 +48,7 @@ operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketI
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/items/:ticketItemId/cancel', cancelTicketItemHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/cancel', cancelTicketHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/cancel-with-reversal', cancelTicketWithReversalHandler);
+operationsRouter.post('/companies/:companyId/branches/:branchId/rentals/:rentalSessionId/cancel', cancelRentalSessionHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/rentals/:rentalSessionId/finish', finishRentalHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/payments', createPaymentHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/payments/:paymentId/reversals', createPaymentReversalHandler);

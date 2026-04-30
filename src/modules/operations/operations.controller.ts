@@ -9,6 +9,7 @@ import {
   cancelTicketItemSchema,
   cancelTicketSchema,
   cancelWithReversalSchema,
+  cancelRentalSessionSchema,
   closeTicketSchema,
   createCatalogItemSchema,
   createPaymentSchema,
@@ -320,6 +321,26 @@ export async function cancelTicketWithReversalHandler(req: Request, res: Respons
       companyId,
       branchId,
       ticketId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function cancelRentalSessionHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const rentalSessionId = String(req.params.rentalSessionId);
+    const body = cancelRentalSessionSchema.parse(req.body);
+    const result = await operationsService.cancelRentalSession(
+      companyId,
+      branchId,
+      rentalSessionId,
       req.auth!.userId,
       req.auth!.globalRole,
       body,

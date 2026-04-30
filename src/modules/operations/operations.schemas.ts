@@ -95,4 +95,8 @@ export const cancelWithReversalSchema = z.object({
   reason: z.string().trim().min(1),
 });
 
+export const cancelRentalSessionSchema = z.object({
+  reason: z.string().trim().min(1),
+});
+
 export const closeTicketSchema = z.object({}).strict();

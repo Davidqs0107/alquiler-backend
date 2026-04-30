@@ -718,6 +718,47 @@ async function ensureTicketItemInTicket(tx: PrismaTx, ticketId: string, ticketIt
   return ticketItem;
 }
 
+async function allocateReversalAmountsFIFO(tx: PrismaTx, ticketId: string, amountNeeded: number) {
+  const payments = await tx.payment.findMany({
+    where: { ticketId },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      amount: true,
+      paymentReversals: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          amount: true,
+        },
+      },
+    },
+  });
+
+  const allocations: Array<{ paymentId: string; amount: number }> = [];
+  let remaining = amountNeeded;
+
+  for (const payment of payments) {
+    if (remaining <= 0.000001) {
+      break;
+    }
+
+    const summary = buildPaymentReversalSummary(payment);
+    if (summary.remainingReversibleAmount <= 0.000001) {
+      continue;
+    }
+
+    const allocated = Math.min(summary.remainingReversibleAmount, remaining);
+    allocations.push({ paymentId: payment.id, amount: allocated });
+    remaining -= allocated;
+  }
+
+  if (remaining > 0.000001) {
+    throw new AppError(409, 'Insufficient reversible balance to support rental cancellation');
+  }
+
+  return allocations;
+}
+
 function getTicketItemGrossSubtotal(ticketItem: { quantity: Prisma.Decimal | number; unitPrice: Prisma.Decimal | number }) {
   return decimalToNumber(ticketItem.quantity) * decimalToNumber(ticketItem.unitPrice);
 }
@@ -1422,6 +1463,116 @@ export async function cancelTicket(
       },
       select: ticketSummarySelect,
     });
+  });
+}
+
+export async function cancelRentalSession(
+  companyId: string,
+  branchId: string,
+  rentalSessionId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: CancelInput,
+) {
+  await ensureSensitiveTicketActionAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const rentalSession = await tx.rentalSession.findFirst({
+      where: { id: rentalSessionId, companyId, branchId },
+      include: {
+        ticketItem: {
+          select: {
+            id: true,
+            ticketId: true,
+            subtotal: true,
+            cancelledAt: true,
+            cancellationReason: true,
+          },
+        },
+      },
+    });
+
+    if (!rentalSession) {
+      throw new AppError(404, 'Rental session not found');
+    }
+
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, rentalSession.ticketItem.ticketId);
+    ensureTicketOpen(ticket);
+
+    if (rentalSession.status === RentalSessionStatus.CANCELLED || rentalSession.ticketItem.cancelledAt) {
+      throw new AppError(409, 'Rental session is already cancelled');
+    }
+
+    if (rentalSession.status === RentalSessionStatus.IN_USE) {
+      throw new AppError(409, 'Rental session in use cannot be cancelled in this phase');
+    }
+
+    const lineCancelableNetAmount = decimalToNumber(rentalSession.ticketItem.subtotal);
+    const financialsBefore = await getTicketFinancialSummary(tx, rentalSession.ticketItem.ticketId);
+    const reversalNeeded = Math.min(lineCancelableNetAmount, financialsBefore.paidNetTotal);
+    const paymentReversals = reversalNeeded > 0 ? await allocateReversalAmountsFIFO(tx, rentalSession.ticketItem.ticketId, reversalNeeded) : [];
+
+    const createdReversals = await Promise.all(
+      paymentReversals.map((allocation) =>
+        tx.paymentReversal.create({
+          data: {
+            companyId,
+            ticketId: rentalSession.ticketItem.ticketId,
+            paymentId: allocation.paymentId,
+            amount: toDecimal(allocation.amount),
+            reason: input.reason,
+            createdById: userId,
+          },
+          select: {
+            id: true,
+            companyId: true,
+            ticketId: true,
+            paymentId: true,
+            amount: true,
+            reason: true,
+            createdById: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        }),
+      ),
+    );
+
+    const now = new Date();
+
+    const updatedSession = await tx.rentalSession.update({
+      where: { id: rentalSessionId },
+      data: {
+        status: RentalSessionStatus.CANCELLED,
+      },
+      select: rentalSessionSelect,
+    });
+
+    const ticketItem = await tx.ticketItem.update({
+      where: { id: rentalSession.ticketItem.id },
+      data: {
+        cancelledAt: now,
+        cancellationReason: input.reason,
+      },
+      select: ticketItemSelect,
+    });
+
+    const updatedTicket = await recalculateTicketTotals(tx, rentalSession.ticketItem.ticketId);
+    const totals = await buildTicketSummary(tx, rentalSession.ticketItem.ticketId);
+
+    return {
+      rentalSession: updatedSession,
+      ticketItem,
+      ticket: updatedTicket,
+      paymentReversals: createdReversals,
+      totals: {
+        paidGrossTotal: totals.paidGrossTotal,
+        reversedTotal: totals.reversedTotal,
+        paidNetTotal: totals.paidNetTotal,
+        paidTotal: totals.paidTotal,
+        pendingAmount: totals.pendingAmount,
+      },
+    };
   });
 }
 
