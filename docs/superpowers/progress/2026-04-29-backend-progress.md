@@ -126,6 +126,11 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - validación de recálculo financiero y marcado lógico de cancelación
 - cobertura de rechazos sobre rentals y tickets con pagos
 
+### 15. Tests automatizados fase 8 filtros de catálogo
+- filtros de listado de catálogo cubiertos en service y HTTP
+- validación de `status`, `type`, `branchId` y `search`
+- cobertura de combinación simple de filtros y scoping global/sede
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -189,33 +194,33 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-30-operations-discounts-tests-phase5-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-sales-happy-path-tests-phase6-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-simple-cancellations-tests-phase7-design.md`
+- `docs/superpowers/specs/2026-04-30-operations-catalog-filters-tests-phase8-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la séptima tanda corta de tests automatizados para cancelaciones simples del módulo `operations`.
+Se diseñó, implementó y validó la octava tanda corta de tests automatizados para filtros de catálogo del módulo `operations`.
 
-Se agregó cobertura para:
-- cancelación de línea no-rental
-- cancelación completa de ticket sin pagos
-- rechazos cuando el flujo simple no aplica
+Se agregó cobertura para lectura con:
+- `status`
+- `type`
+- `branchId`
+- `search`
+- combinación simple de filtros
 
 La suite automatizada quedó validada exitosamente cubriendo además:
-1. cancelación de línea marca `cancelledAt`
-2. cancelación de línea guarda `cancellationReason`
-3. cancelación de línea recalcula `ticket.total`
-4. cancelación completa deja ticket en `CANCELLED`
-5. cancelación completa deja `subtotal = 0`
-6. cancelación completa deja `discountAmount = 0`
-7. cancelación completa deja `total = 0`
-8. rechazo de cancelación simple sobre línea `RENTAL`
-9. rechazo de cancelación de línea en ticket con pagos
-10. rechazo de cancelación simple de ticket con pagos
-11. validación HTTP de cancelación de línea
-12. validación HTTP de cancelación de ticket
-13. compilación correcta con `npm run build`
+1. filtro por `status`
+2. filtro por `type`
+3. filtro por `branchId` devuelve globales + sede pedida
+4. filtro por `branchId` excluye ítems de otra sede
+5. `search` parcial case-insensitive
+6. combinación simple de filtros
+7. validación HTTP de `branchId`
+8. validación HTTP de `status + type`
+9. validación HTTP de `search`
+10. compilación correcta con `npm run build`
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- ampliar cobertura automatizada a catalog maintenance y filtros
+- ampliar cobertura automatizada a edición y activación/inactivación de catálogo
 - reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
 

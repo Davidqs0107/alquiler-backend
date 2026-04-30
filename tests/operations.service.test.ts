@@ -227,6 +227,108 @@ describe('operations service rental happy path', () => {
   });
 });
 
+async function createCatalogFilterDataset() {
+  const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+  const company = await createCompany();
+  const branchA = await createBranch({ companyId: company.id, name: 'Branch A' });
+  const branchB = await createBranch({ companyId: company.id, name: 'Branch B' });
+
+  const globalProduct = await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+    name: 'Water Bottle',
+    type: 'PRODUCT',
+    price: 50,
+  });
+
+  const branchAService = await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+    name: 'Towel Rental',
+    type: 'SERVICE',
+    price: 20,
+    branchId: branchA.id,
+  });
+
+  const branchBProduct = await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+    name: 'Snacks Combo',
+    type: 'PRODUCT',
+    price: 30,
+    branchId: branchB.id,
+  });
+
+  const inactiveGlobalService = await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+    name: 'Old Service',
+    type: 'SERVICE',
+    price: 10,
+  });
+
+  await operationsService.deactivateCatalogItem(company.id, inactiveGlobalService.id, user.id, user.globalRole);
+
+  return {
+    user,
+    company,
+    branchA,
+    branchB,
+    globalProduct,
+    branchAService,
+    branchBProduct,
+    inactiveGlobalService,
+  };
+}
+
+describe('operations service catalog filters', () => {
+  it('filters catalog items by status', async () => {
+    const { user, company, inactiveGlobalService } = await createCatalogFilterDataset();
+
+    const activeItems = await operationsService.listCatalogItems(company.id, user.id, user.globalRole, { status: 'ACTIVE' });
+    const inactiveItems = await operationsService.listCatalogItems(company.id, user.id, user.globalRole, { status: 'INACTIVE' });
+
+    assert.equal(activeItems.every((item) => item.status === 'ACTIVE'), true);
+    assert.equal(inactiveItems.length, 1);
+    assert.equal(inactiveItems[0].id, inactiveGlobalService.id);
+  });
+
+  it('filters catalog items by type', async () => {
+    const { user, company } = await createCatalogFilterDataset();
+
+    const serviceItems = await operationsService.listCatalogItems(company.id, user.id, user.globalRole, { type: 'SERVICE' });
+
+    assert.equal(serviceItems.every((item) => item.type === 'SERVICE'), true);
+    assert.deepEqual(
+      serviceItems.map((item) => item.name).sort(),
+      ['Old Service', 'Towel Rental'],
+    );
+  });
+
+  it('filters catalog items by branch including global items and excluding other branches', async () => {
+    const { user, company, branchA } = await createCatalogFilterDataset();
+
+    const items = await operationsService.listCatalogItems(company.id, user.id, user.globalRole, { branchId: branchA.id });
+    const names = items.map((item) => item.name).sort();
+
+    assert.deepEqual(names, ['Old Service', 'Towel Rental', 'Water Bottle']);
+  });
+
+  it('filters catalog items by partial case-insensitive search', async () => {
+    const { user, company } = await createCatalogFilterDataset();
+
+    const items = await operationsService.listCatalogItems(company.id, user.id, user.globalRole, { search: 'water' });
+
+    assert.equal(items.length, 1);
+    assert.equal(items[0].name, 'Water Bottle');
+  });
+
+  it('combines catalog filters correctly', async () => {
+    const { user, company, branchA } = await createCatalogFilterDataset();
+
+    const items = await operationsService.listCatalogItems(company.id, user.id, user.globalRole, {
+      branchId: branchA.id,
+      status: 'ACTIVE',
+      type: 'SERVICE',
+    });
+
+    assert.equal(items.length, 1);
+    assert.equal(items[0].name, 'Towel Rental');
+  });
+});
+
 describe('operations service simple cancellations', () => {
   it('cancels a non-rental ticket item and recalculates ticket total', async () => {
     const { user, company, branch } = await createOperationsContext();

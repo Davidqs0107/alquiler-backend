@@ -107,6 +107,111 @@ describe('operations http smoke', () => {
   });
 });
 
+describe('operations http catalog filters', () => {
+  it('lists global and branch items when filtering by branchId', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branchA = await createBranch({ companyId: company.id, name: 'Branch A' });
+    const branchB = await createBranch({ companyId: company.id, name: 'Branch B' });
+
+    await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Water Bottle',
+      type: 'PRODUCT',
+      price: 50,
+    });
+
+    await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Towel Rental',
+      type: 'SERVICE',
+      price: 20,
+      branchId: branchA.id,
+    });
+
+    await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Snacks Combo',
+      type: 'PRODUCT',
+      price: 30,
+      branchId: branchB.id,
+    });
+
+    const inactive = await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Old Service',
+      type: 'SERVICE',
+      price: 10,
+    });
+
+    await operationsService.deactivateCatalogItem(company.id, inactive.id, user.id, user.globalRole);
+
+    const response = await request(app)
+      .get(`/companies/${company.id}/catalog-items`)
+      .query({ branchId: branchA.id })
+      .set('Authorization', authHeaderFor(user));
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      response.body.map((item: { name: string }) => item.name).sort(),
+      ['Old Service', 'Towel Rental', 'Water Bottle'],
+    );
+  });
+
+  it('filters catalog items by status and type through endpoint', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+
+    await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Water Bottle',
+      type: 'PRODUCT',
+      price: 50,
+    });
+
+    const inactive = await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Old Service',
+      type: 'SERVICE',
+      price: 10,
+    });
+
+    await operationsService.deactivateCatalogItem(company.id, inactive.id, user.id, user.globalRole);
+
+    const response = await request(app)
+      .get(`/companies/${company.id}/catalog-items`)
+      .query({ status: 'INACTIVE', type: 'SERVICE' })
+      .set('Authorization', authHeaderFor(user));
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.length, 1);
+    assert.equal(response.body[0].name, 'Old Service');
+  });
+
+  it('filters catalog items by search through endpoint', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+
+    await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Water Bottle',
+      type: 'PRODUCT',
+      price: 50,
+    });
+
+    await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Towel Rental',
+      type: 'SERVICE',
+      price: 20,
+    });
+
+    const response = await request(app)
+      .get(`/companies/${company.id}/catalog-items`)
+      .query({ search: 'water' })
+      .set('Authorization', authHeaderFor(user));
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.length, 1);
+    assert.equal(response.body[0].name, 'Water Bottle');
+  });
+});
+
 describe('operations http simple cancellations', () => {
   it('cancels a non-rental item through endpoint and recalculates ticket total', async () => {
     const app = createApp();
