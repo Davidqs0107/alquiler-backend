@@ -1,6 +1,6 @@
 # Progreso backend — alquileres
 
-Fecha: 2026-04-29
+Fecha: 2026-04-30
 
 ## Estado actual
 El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correctamente y el módulo operacional extendido con:
@@ -8,8 +8,9 @@ El proyecto quedó funcionando con PostgreSQL en Docker, Prisma conectado correc
 - fase 2 de catálogo/manual/extras/descuentos/cancelaciones simples
 - mantenimiento de catálogo
 - cancelación avanzada de tickets con reversos de pago
+- primera tanda de tests automatizados para `operations`
 
-Todo quedó validado con smoke tests manuales y compilando correctamente con `npm run build`.
+Todo quedó validado con smoke tests manuales, `npm test` y compilando correctamente con `npm run build`.
 
 ## Stack base implementado
 - Node.js
@@ -89,6 +90,12 @@ Todo quedó validado con smoke tests manuales y compilando correctamente con `np
 - generar reverso por cada pago asociado
 - exponer lectura financiera con `paidGrossTotal`, `reversedTotal` y `paidNetTotal`
 
+### 8. Tests automatizados fase 1
+- runner de tests con `tsx --test`
+- suite de servicio con PostgreSQL real para reglas críticas de `operations`
+- smoke tests HTTP para creación de ticket, pagos y cancelación con reversos
+- helpers reutilizables de cleanup y factories para tests
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -133,6 +140,7 @@ Todo quedó validado con smoke tests manuales y compilando correctamente con `np
 - `57a3f55` feat: add phase 2 catalog discounts and cancellations
 - `d6a3770` feat: add catalog maintenance endpoints and filters
 - `fe24353` feat: add ticket cancellation with payment reversals
+- `149a83e` docs: add operations tests phase 1 design spec
 
 ## Specs escritas
 - `docs/superpowers/specs/2026-04-29-app-alquileres-design.md`
@@ -144,25 +152,32 @@ Todo quedó validado con smoke tests manuales y compilando correctamente con `np
 - `docs/superpowers/specs/2026-04-29-sales-manual-extras-discounts-cancellations-design.md`
 - `docs/superpowers/specs/2026-04-29-catalog-maintenance-design.md`
 - `docs/superpowers/specs/2026-04-29-ticket-cancellation-with-payment-reversals-design.md`
+- `docs/superpowers/specs/2026-04-30-operations-tests-phase1-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la cancelación avanzada de tickets con pagos mediante reversos dedicados.
+Se diseñó, implementó y validó la primera tanda de tests automatizados del módulo `operations`.
 
-Se agregó nueva migración Prisma con `PaymentReversal` y se actualizaron las lecturas financieras del ticket.
+Se agregó:
+- script `npm test`
+- suites en `tests/operations.service.test.ts` y `tests/operations.http.test.ts`
+- cleanup centralizado de DB en `tests/helpers/db.ts`
+- factories reutilizables en `tests/helpers/factories.ts`
 
-Se hizo smoke test manual exitoso cubriendo:
-1. apertura de ticket
-2. agregado de línea manual
-3. registro de pago
-4. cancelación con reverso
-5. creación de reverso por cada pago
-6. ticket en estado `CANCELLED`
-7. lectura correcta de `paidGrossTotal`, `reversedTotal` y `paidNetTotal`
-8. rechazo de segunda cancelación sobre el mismo ticket
+La suite automatizada quedó validada exitosamente cubriendo:
+1. rechazo de alquiler con solapamiento activo
+2. rechazo de pago por encima del pendiente
+3. rechazo de cierre con saldo pendiente
+4. rechazo de cierre con sesión activa
+5. rechazo de segunda cancelación con reverso
+6. rechazo de cancelación simple en tickets con pagos
+7. creación HTTP de ticket
+8. registro HTTP de pago
+9. cancelación HTTP con reversos
+10. compilación correcta con `npm run build`
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- tests automatizados del módulo `operations`
+- ampliar cobertura automatizada a happy paths completos y permisos
 - reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
 
@@ -171,13 +186,14 @@ Al volver, revisar primero:
 1. que Docker siga levantado
 2. que Prisma esté migrado
 3. que el servidor arranque con `npm run dev`
-4. correr `npm run build`
-5. reprobar smoke tests de:
+4. correr `npm test`
+5. correr `npm run build`
+6. si hace falta, reprobar smoke tests manuales de:
    - fase 1 operaciones
    - fase 2 operaciones
    - mantenimiento de catálogo
    - cancelación con reversos
-6. decidir si el siguiente bloque será:
-   - tests automatizados
+7. decidir si el siguiente bloque será:
+   - ampliar tests automatizados
    - reversos más finos
    - cancelaciones operativas de alquiler
