@@ -227,6 +227,34 @@ describe('operations service rental happy path', () => {
   });
 });
 
+describe('operations service rental overtime', () => {
+  it('recalculates overtime for TIME_UNIT rentals rounding up extra block', async () => {
+    const { user, company, branch, resource } = await createOperationsContext();
+
+    const started = await operationsService.startRental(company.id, branch.id, user.id, user.globalRole, {
+      resourceId: resource.id,
+      reservedMinutes: 60,
+      startAt: new Date('2026-04-30T10:00:00.000Z'),
+    });
+
+    const finished = await operationsService.finishRental(
+      company.id,
+      branch.id,
+      started.rentalSession.id,
+      user.id,
+      user.globalRole,
+      { endedAt: new Date('2026-04-30T11:30:00.000Z') },
+    );
+
+    assert.equal(finished.rentalSession.usedMinutes, 90);
+    assert.equal(finished.rentalSession.overtimeMinutes, 30);
+    assert.equal(Number(finished.rentalSession.baseAmount), 100);
+    assert.equal(Number(finished.rentalSession.overtimeAmount), 100);
+    assert.equal(Number(finished.rentalSession.totalAmount), 200);
+    assert.equal(Number(finished.ticket.total), 200);
+  });
+});
+
 describe('operations service permissions', () => {
   it('allows CAJERO to create a ticket', async () => {
     const company = await createCompany();

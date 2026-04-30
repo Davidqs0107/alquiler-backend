@@ -172,6 +172,52 @@ describe('operations http rental happy path', () => {
   });
 });
 
+describe('operations http rental overtime', () => {
+  it('recalculates overtime for TIME_UNIT rentals through endpoints', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const category = await createResourceCategory({ companyId: company.id });
+    const resource = await createResource({
+      companyId: company.id,
+      branchId: branch.id,
+      resourceCategoryId: category.id,
+    });
+
+    await createRatePlan({
+      companyId: company.id,
+      branchId: branch.id,
+      basePrice: 100,
+      timeUnitMinutes: 60,
+    });
+
+    const startResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/start`)
+      .set('Authorization', authHeaderFor(user))
+      .send({
+        resourceId: resource.id,
+        reservedMinutes: 60,
+        startAt: '2026-04-30T10:00:00.000Z',
+      });
+
+    assert.equal(startResponse.status, 201);
+
+    const finishResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/${startResponse.body.rentalSession.id}/finish`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ endedAt: '2026-04-30T11:30:00.000Z' });
+
+    assert.equal(finishResponse.status, 200);
+    assert.equal(finishResponse.body.rentalSession.usedMinutes, 90);
+    assert.equal(finishResponse.body.rentalSession.overtimeMinutes, 30);
+    assert.equal(Number(finishResponse.body.rentalSession.baseAmount), 100);
+    assert.equal(Number(finishResponse.body.rentalSession.overtimeAmount), 100);
+    assert.equal(Number(finishResponse.body.rentalSession.totalAmount), 200);
+    assert.equal(Number(finishResponse.body.ticket.total), 200);
+  });
+});
+
 describe('operations http permissions', () => {
   it('allows CAJERO on a normal endpoint', async () => {
     const app = createApp();
