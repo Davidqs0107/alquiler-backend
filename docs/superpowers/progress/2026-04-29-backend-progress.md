@@ -101,6 +101,11 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - cobertura service para `CAJERO`, `RECEPCION`, `ADMIN_EMPRESA`, `ADMIN_SEDE` y usuario sin membresía
 - smoke tests HTTP de permisos para endpoint normal y endpoint sensible
 
+### 10. Tests automatizados fase 3 happy path de alquiler
+- flujo base sin overtime cubierto en service y HTTP
+- start rental → finish rental → payment → close ticket
+- validación de estados, montos y cierre completo del ticket
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -159,30 +164,29 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-29-ticket-cancellation-with-payment-reversals-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-tests-phase1-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-permissions-tests-phase2-design.md`
+- `docs/superpowers/specs/2026-04-30-operations-rental-happy-path-tests-phase3-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la segunda tanda corta de tests automatizados para permisos del módulo `operations`.
+Se diseñó, implementó y validó la tercera tanda corta de tests automatizados para el happy path principal de alquiler.
 
-Se agregó cobertura para diferenciar correctamente:
-- operaciones normales
-- acciones sensibles como cancelación con reverso
+Se agregó cobertura para el flujo base sin overtime:
+- iniciar alquiler
+- finalizarlo dentro del tiempo reservado
+- registrar pago total
+- cerrar ticket
 
 La suite automatizada quedó validada exitosamente cubriendo además:
-1. `CAJERO` puede crear ticket
-2. `RECEPCION` puede crear ticket
-3. usuario sin membresía no puede crear ticket
-4. `ADMIN_EMPRESA` puede cancelar con reverso
-5. `ADMIN_SEDE` puede cancelar con reverso
-6. `CAJERO` no puede cancelar con reverso
-7. `RECEPCION` no puede cancelar con reverso
-8. endpoint normal acepta `CAJERO`
-9. endpoint sensible rechaza `CAJERO`
-10. endpoint sensible acepta `ADMIN_SEDE`
-11. compilación correcta con `npm run build`
+1. `startRental` crea ticket, línea rental y sesión reservada
+2. `finishRental` dentro de tiempo deja `overtimeMinutes = 0`
+3. el monto de la sesión se conserva correctamente sin overtime
+4. `createPayment` deja `pendingAmount = 0`
+5. `closeTicket` deja ticket en `CLOSED`
+6. happy path completo por HTTP para rental sin overtime
+7. compilación correcta con `npm run build`
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- ampliar cobertura automatizada a happy paths completos
+- ampliar cobertura automatizada a overtime, descuentos y ticket manual/catalog/extras
 - reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
 

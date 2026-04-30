@@ -177,6 +177,56 @@ async function createPermissionContext() {
   return { company, branch, ticket };
 }
 
+describe('operations service rental happy path', () => {
+  it('completes rental without overtime, gets paid and closes ticket', async () => {
+    const { user, company, branch, resource } = await createOperationsContext();
+    const startAt = new Date('2026-04-30T10:00:00.000Z');
+
+    const started = await operationsService.startRental(company.id, branch.id, user.id, user.globalRole, {
+      resourceId: resource.id,
+      reservedMinutes: 60,
+      startAt,
+    });
+
+    assert.equal(started.ticket.status, 'OPEN');
+    assert.equal(started.ticketItem.type, 'RENTAL');
+    assert.equal(started.rentalSession.status, 'RESERVED');
+    assert.equal(Number(started.rentalSession.baseAmount), 100);
+    assert.equal(Number(started.rentalSession.totalAmount), 100);
+    assert.equal(started.totals.pendingAmount, 100);
+
+    const finished = await operationsService.finishRental(
+      company.id,
+      branch.id,
+      started.rentalSession.id,
+      user.id,
+      user.globalRole,
+      { endedAt: new Date('2026-04-30T10:45:00.000Z') },
+    );
+
+    assert.equal(finished.rentalSession.status, 'FINISHED');
+    assert.equal(finished.rentalSession.overtimeMinutes, 0);
+    assert.equal(Number(finished.rentalSession.baseAmount), 100);
+    assert.equal(Number(finished.rentalSession.overtimeAmount), 0);
+    assert.equal(Number(finished.rentalSession.totalAmount), 100);
+    assert.equal(Number(finished.ticket.total), 100);
+    assert.equal(finished.totals.pendingAmount, 100);
+
+    const payment = await operationsService.createPayment(company.id, branch.id, started.ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 100,
+    });
+
+    assert.equal(payment.paidNetTotal, 100);
+    assert.equal(payment.pendingAmount, 0);
+
+    const closed = await operationsService.closeTicket(company.id, branch.id, started.ticket.id, user.id, user.globalRole);
+
+    assert.equal(closed.status, 'CLOSED');
+    assert.ok(closed.closedAt);
+  });
+});
+
 describe('operations service permissions', () => {
   it('allows CAJERO to create a ticket', async () => {
     const company = await createCompany();

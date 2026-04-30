@@ -9,6 +9,9 @@ import { signAccessToken } from '../src/utils/jwt';
 import {
   createBranch,
   createCompany,
+  createRatePlan,
+  createResource,
+  createResourceCategory,
   createUser,
   grantBranchMembership,
   grantCompanyMembership,
@@ -101,6 +104,71 @@ describe('operations http smoke', () => {
     assert.equal(response.body.totals.paidNetTotal, 0);
     assert.equal(response.body.paymentReversals.length, 1);
     assert.ok(response.body.paymentReversals[0].id);
+  });
+});
+
+describe('operations http rental happy path', () => {
+  it('completes rental without overtime through endpoints', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const category = await createResourceCategory({ companyId: company.id });
+    const resource = await createResource({
+      companyId: company.id,
+      branchId: branch.id,
+      resourceCategoryId: category.id,
+    });
+
+    await createRatePlan({
+      companyId: company.id,
+      branchId: branch.id,
+      basePrice: 100,
+      timeUnitMinutes: 60,
+    });
+
+    const startResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/start`)
+      .set('Authorization', authHeaderFor(user))
+      .send({
+        resourceId: resource.id,
+        reservedMinutes: 60,
+        startAt: '2026-04-30T10:00:00.000Z',
+      });
+
+    assert.equal(startResponse.status, 201);
+    assert.equal(startResponse.body.ticket.status, 'OPEN');
+    assert.equal(startResponse.body.rentalSession.status, 'RESERVED');
+
+    const finishResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/${startResponse.body.rentalSession.id}/finish`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ endedAt: '2026-04-30T10:45:00.000Z' });
+
+    assert.equal(finishResponse.status, 200);
+    assert.equal(finishResponse.body.rentalSession.status, 'FINISHED');
+    assert.equal(finishResponse.body.rentalSession.overtimeMinutes, 0);
+    assert.equal(Number(finishResponse.body.rentalSession.totalAmount), 100);
+
+    const paymentResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${startResponse.body.ticket.id}/payments`)
+      .set('Authorization', authHeaderFor(user))
+      .send({
+        method: PaymentMethod.CASH,
+        amount: 100,
+      });
+
+    assert.equal(paymentResponse.status, 201);
+    assert.equal(paymentResponse.body.paidNetTotal, 100);
+    assert.equal(paymentResponse.body.pendingAmount, 0);
+
+    const closeResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${startResponse.body.ticket.id}/close`)
+      .set('Authorization', authHeaderFor(user))
+      .send({});
+
+    assert.equal(closeResponse.status, 200);
+    assert.equal(closeResponse.body.status, 'CLOSED');
   });
 });
 
