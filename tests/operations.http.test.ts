@@ -107,6 +107,76 @@ describe('operations http smoke', () => {
   });
 });
 
+describe('operations http sales happy path', () => {
+  it('completes sale flow with catalog, manual and extra items through endpoints', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+
+    const catalogResponse = await request(app)
+      .post(`/companies/${company.id}/catalog-items`)
+      .set('Authorization', authHeaderFor(user))
+      .send({
+        name: 'Water bottle',
+        type: 'PRODUCT',
+        price: 50,
+        branchId: branch.id,
+      });
+
+    assert.equal(catalogResponse.status, 201);
+
+    const ticketResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets`)
+      .set('Authorization', authHeaderFor(user))
+      .send({});
+
+    assert.equal(ticketResponse.status, 201);
+
+    const catalogAdded = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticketResponse.body.id}/items/catalog`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ catalogItemId: catalogResponse.body.id, quantity: 1 });
+
+    assert.equal(catalogAdded.status, 201);
+    assert.equal(catalogAdded.body.ticketItem.type, 'PRODUCT');
+
+    const manualAdded = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticketResponse.body.id}/items/manual`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ description: 'Manual service', quantity: 1, unitPrice: 100 });
+
+    assert.equal(manualAdded.status, 201);
+    assert.equal(manualAdded.body.ticketItem.type, 'MANUAL');
+
+    const extraAdded = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticketResponse.body.id}/items/extra`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ description: 'Extra fee', quantity: 1, unitPrice: 25 });
+
+    assert.equal(extraAdded.status, 201);
+    assert.equal(extraAdded.body.ticketItem.type, 'EXTRA');
+    assert.equal(Number(extraAdded.body.ticket.total), 175);
+
+    const paymentResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticketResponse.body.id}/payments`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ method: PaymentMethod.CASH, amount: 175 });
+
+    assert.equal(paymentResponse.status, 201);
+    assert.equal(paymentResponse.body.paidNetTotal, 175);
+    assert.equal(paymentResponse.body.pendingAmount, 0);
+
+    const closeResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticketResponse.body.id}/close`)
+      .set('Authorization', authHeaderFor(user))
+      .send({});
+
+    assert.equal(closeResponse.status, 200);
+    assert.equal(closeResponse.body.status, 'CLOSED');
+  });
+});
+
 describe('operations http rental happy path', () => {
   it('completes rental without overtime through endpoints', async () => {
     const app = createApp();

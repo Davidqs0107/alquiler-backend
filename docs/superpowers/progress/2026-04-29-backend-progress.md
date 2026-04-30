@@ -116,6 +116,11 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - validación de recálculo de subtotales, `discountAmount` y `ticket.total`
 - cobertura de rechazos cuando el descuento excede lo permitido
 
+### 13. Tests automatizados fase 6 happy path de venta
+- flujo no-rental cubierto con catálogo, línea manual y extra
+- create ticket → add catalog → add manual → add extra → payment → close
+- validación de tipos de línea, total acumulado y cierre completo del ticket
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -177,29 +182,33 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-30-operations-rental-happy-path-tests-phase3-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-rental-overtime-tests-phase4-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-discounts-tests-phase5-design.md`
+- `docs/superpowers/specs/2026-04-30-operations-sales-happy-path-tests-phase6-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la quinta tanda corta de tests automatizados para descuentos del módulo `operations`.
+Se diseñó, implementó y validó la sexta tanda corta de tests automatizados para el happy path de venta no-rental.
 
-Se agregó cobertura para:
-- descuento por línea
-- descuento global del ticket
-- rechazos por exceder límites permitidos
+Se agregó cobertura para el flujo:
+- crear ticket
+- agregar ítem de catálogo
+- agregar línea manual
+- agregar línea extra
+- registrar pago total
+- cerrar ticket
 
 La suite automatizada quedó validada exitosamente cubriendo además:
-1. descuento por línea recalcula `ticketItem.subtotal`
-2. descuento por línea recalcula `ticket.total`
-3. descuento global recalcula `ticket.discountAmount`
-4. descuento global recalcula `ticket.total`
-5. rechazo de descuento por línea mayor al subtotal bruto
-6. rechazo de descuento global mayor al subtotal activo del ticket
-7. validación HTTP del endpoint de descuento por línea
-8. validación HTTP del endpoint de descuento global
+1. línea de catálogo queda como `PRODUCT`
+2. línea manual queda como `MANUAL`
+3. línea extra queda como `EXTRA`
+4. `ticket.total = 175`
+5. `paidNetTotal = 175`
+6. `pendingAmount = 0`
+7. ticket finaliza en `CLOSED`
+8. validación completa del flujo por HTTP
 9. compilación correcta con `npm run build`
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- ampliar cobertura automatizada a happy path de ticket manual/catalog/extras
+- ampliar cobertura automatizada a cancelaciones simples de líneas/tickets y catálogo maintenance
 - reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
 

@@ -227,6 +227,59 @@ describe('operations service rental happy path', () => {
   });
 });
 
+describe('operations service sales happy path', () => {
+  it('completes sale flow with catalog, manual and extra items, payment and closing', async () => {
+    const { user, company, branch } = await createOperationsContext();
+
+    const catalogItem = await operationsService.createCatalogItem(company.id, user.id, user.globalRole, {
+      name: 'Water bottle',
+      type: 'PRODUCT',
+      price: 50,
+      branchId: branch.id,
+    });
+
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    const catalogAdded = await operationsService.addCatalogItemToTicket(
+      company.id,
+      branch.id,
+      ticket.id,
+      user.id,
+      user.globalRole,
+      { catalogItemId: catalogItem.id, quantity: 1 },
+    );
+
+    const manualAdded = await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual service',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    const extraAdded = await operationsService.addExtraItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Extra fee',
+      quantity: 1,
+      unitPrice: 25,
+    });
+
+    assert.equal(catalogAdded.ticketItem.type, 'PRODUCT');
+    assert.equal(manualAdded.ticketItem.type, 'MANUAL');
+    assert.equal(extraAdded.ticketItem.type, 'EXTRA');
+    assert.equal(Number(extraAdded.ticket.total), 175);
+
+    const payment = await operationsService.createPayment(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 175,
+    });
+
+    assert.equal(payment.paidNetTotal, 175);
+    assert.equal(payment.pendingAmount, 0);
+
+    const closed = await operationsService.closeTicket(company.id, branch.id, ticket.id, user.id, user.globalRole);
+
+    assert.equal(closed.status, 'CLOSED');
+  });
+});
+
 describe('operations service discounts', () => {
   it('recalculates ticket totals after line discount', async () => {
     const { user, company, branch } = await createOperationsContext();
