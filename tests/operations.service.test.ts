@@ -227,6 +227,141 @@ describe('operations service rental happy path', () => {
   });
 });
 
+describe('operations service simple cancellations', () => {
+  it('cancels a non-rental ticket item and recalculates ticket total', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    const manual = await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.addExtraItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Extra item',
+      quantity: 1,
+      unitPrice: 25,
+    });
+
+    const cancelled = await operationsService.cancelTicketItem(
+      company.id,
+      branch.id,
+      ticket.id,
+      manual.ticketItem.id,
+      user.id,
+      user.globalRole,
+      { reason: 'Remove manual item' },
+    );
+
+    assert.ok(cancelled.ticketItem.cancelledAt);
+    assert.equal(cancelled.ticketItem.cancellationReason, 'Remove manual item');
+    assert.equal(Number(cancelled.ticket.total), 25);
+  });
+
+  it('cancels a ticket without payments and zeroes financial totals', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.addExtraItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Extra item',
+      quantity: 1,
+      unitPrice: 25,
+    });
+
+    const cancelled = await operationsService.cancelTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      reason: 'Cancel whole ticket',
+    });
+
+    assert.equal(cancelled.status, 'CANCELLED');
+    assert.ok(cancelled.cancelledAt);
+    assert.equal(cancelled.cancellationReason, 'Cancel whole ticket');
+    assert.equal(Number(cancelled.subtotal), 0);
+    assert.equal(Number(cancelled.discountAmount), 0);
+    assert.equal(Number(cancelled.total), 0);
+  });
+
+  it('rejects simple cancellation of rental ticket item', async () => {
+    const { user, company, branch, resource } = await createOperationsContext();
+    const rental = await operationsService.startRental(company.id, branch.id, user.id, user.globalRole, {
+      resourceId: resource.id,
+      reservedMinutes: 60,
+      startAt: new Date('2026-04-30T10:00:00.000Z'),
+    });
+
+    await assert.rejects(
+      operationsService.cancelTicketItem(
+        company.id,
+        branch.id,
+        rental.ticket.id,
+        rental.ticketItem.id,
+        user.id,
+        user.globalRole,
+        { reason: 'Should fail' },
+      ),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+
+  it('rejects simple line cancellation when ticket already has payments', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    const manual = await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 50,
+    });
+
+    await assert.rejects(
+      operationsService.cancelTicketItem(
+        company.id,
+        branch.id,
+        ticket.id,
+        manual.ticketItem.id,
+        user.id,
+        user.globalRole,
+        { reason: 'Should fail' },
+      ),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+
+  it('rejects simple ticket cancellation when ticket already has payments', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 50,
+    });
+
+    await assert.rejects(
+      operationsService.cancelTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+        reason: 'Should fail',
+      }),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+});
+
 describe('operations service sales happy path', () => {
   it('completes sale flow with catalog, manual and extra items, payment and closing', async () => {
     const { user, company, branch } = await createOperationsContext();

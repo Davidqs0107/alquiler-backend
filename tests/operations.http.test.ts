@@ -107,6 +107,68 @@ describe('operations http smoke', () => {
   });
 });
 
+describe('operations http simple cancellations', () => {
+  it('cancels a non-rental item through endpoint and recalculates ticket total', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    const manual = await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.addExtraItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Extra item',
+      quantity: 1,
+      unitPrice: 25,
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticket.id}/items/${manual.ticketItem.id}/cancel`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ reason: 'Remove manual item' });
+
+    assert.equal(response.status, 200);
+    assert.ok(response.body.ticketItem.cancelledAt);
+    assert.equal(response.body.ticketItem.cancellationReason, 'Remove manual item');
+    assert.equal(Number(response.body.ticket.total), 25);
+  });
+
+  it('cancels a ticket without payments through endpoint', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Manual item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.addExtraItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Extra item',
+      quantity: 1,
+      unitPrice: 25,
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticket.id}/cancel`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ reason: 'Cancel whole ticket' });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.status, 'CANCELLED');
+    assert.equal(response.body.cancellationReason, 'Cancel whole ticket');
+    assert.equal(Number(response.body.total), 0);
+  });
+});
+
 describe('operations http sales happy path', () => {
   it('completes sale flow with catalog, manual and extra items through endpoints', async () => {
     const app = createApp();

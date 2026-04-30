@@ -121,6 +121,11 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - create ticket → add catalog → add manual → add extra → payment → close
 - validación de tipos de línea, total acumulado y cierre completo del ticket
 
+### 14. Tests automatizados fase 7 cancelaciones simples
+- cancelación de línea no-rental y cancelación completa de ticket sin pagos
+- validación de recálculo financiero y marcado lógico de cancelación
+- cobertura de rechazos sobre rentals y tickets con pagos
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -183,32 +188,34 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-30-operations-rental-overtime-tests-phase4-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-discounts-tests-phase5-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-sales-happy-path-tests-phase6-design.md`
+- `docs/superpowers/specs/2026-04-30-operations-simple-cancellations-tests-phase7-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la sexta tanda corta de tests automatizados para el happy path de venta no-rental.
+Se diseñó, implementó y validó la séptima tanda corta de tests automatizados para cancelaciones simples del módulo `operations`.
 
-Se agregó cobertura para el flujo:
-- crear ticket
-- agregar ítem de catálogo
-- agregar línea manual
-- agregar línea extra
-- registrar pago total
-- cerrar ticket
+Se agregó cobertura para:
+- cancelación de línea no-rental
+- cancelación completa de ticket sin pagos
+- rechazos cuando el flujo simple no aplica
 
 La suite automatizada quedó validada exitosamente cubriendo además:
-1. línea de catálogo queda como `PRODUCT`
-2. línea manual queda como `MANUAL`
-3. línea extra queda como `EXTRA`
-4. `ticket.total = 175`
-5. `paidNetTotal = 175`
-6. `pendingAmount = 0`
-7. ticket finaliza en `CLOSED`
-8. validación completa del flujo por HTTP
-9. compilación correcta con `npm run build`
+1. cancelación de línea marca `cancelledAt`
+2. cancelación de línea guarda `cancellationReason`
+3. cancelación de línea recalcula `ticket.total`
+4. cancelación completa deja ticket en `CANCELLED`
+5. cancelación completa deja `subtotal = 0`
+6. cancelación completa deja `discountAmount = 0`
+7. cancelación completa deja `total = 0`
+8. rechazo de cancelación simple sobre línea `RENTAL`
+9. rechazo de cancelación de línea en ticket con pagos
+10. rechazo de cancelación simple de ticket con pagos
+11. validación HTTP de cancelación de línea
+12. validación HTTP de cancelación de ticket
+13. compilación correcta con `npm run build`
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- ampliar cobertura automatizada a cancelaciones simples de líneas/tickets y catálogo maintenance
+- ampliar cobertura automatizada a catalog maintenance y filtros
 - reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
 
