@@ -56,6 +56,11 @@ type CreatePaymentInput = {
   notes?: string;
 };
 
+type CreatePaymentReversalInput = {
+  amount: number;
+  reason: string;
+};
+
 type AddCatalogItemToTicketInput = {
   catalogItemId: string;
   quantity: number;
@@ -482,6 +487,56 @@ async function getTicketFinancialSummary(tx: PrismaTx, ticketId: string) {
   };
 }
 
+async function ensurePaymentInTicket(tx: PrismaTx, ticketId: string, paymentId: string) {
+  const payment = await tx.payment.findFirst({
+    where: {
+      id: paymentId,
+      ticketId,
+    },
+    select: {
+      id: true,
+      companyId: true,
+      ticketId: true,
+      method: true,
+      amount: true,
+      notes: true,
+      createdAt: true,
+      updatedAt: true,
+      paymentReversals: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          amount: true,
+          reason: true,
+          createdById: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+  });
+
+  if (!payment) {
+    throw new AppError(404, 'Payment not found');
+  }
+
+  return payment;
+}
+
+function buildPaymentReversalSummary(payment: {
+  amount: Prisma.Decimal | number;
+  paymentReversals: Array<{ amount: Prisma.Decimal | number }>;
+}) {
+  const originalAmount = decimalToNumber(payment.amount);
+  const reversedAmount = payment.paymentReversals.reduce((sum, reversal) => sum + decimalToNumber(reversal.amount), 0);
+
+  return {
+    originalAmount,
+    reversedAmount,
+    remainingReversibleAmount: Math.max(originalAmount - reversedAmount, 0),
+  };
+}
+
 async function buildTicketSummary(tx: PrismaTx, ticketId: string) {
   const ticket = await tx.ticket.findUnique({
     where: { id: ticketId },
@@ -902,7 +957,7 @@ export async function listTickets(
       payments: {
         select: {
           amount: true,
-          paymentReversal: {
+          paymentReversals: {
             select: {
               amount: true,
             },
@@ -915,7 +970,8 @@ export async function listTickets(
   return tickets.map((ticket) => {
     const paidGrossTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
     const reversedTotal = ticket.payments.reduce(
-      (sum, payment) => sum + decimalToNumber(payment.paymentReversal?.amount),
+      (sum, payment) =>
+        sum + payment.paymentReversals.reduce((innerSum, reversal) => innerSum + decimalToNumber(reversal.amount), 0),
       0,
     );
     const paidNetTotal = Math.max(paidGrossTotal - reversedTotal, 0);
@@ -963,7 +1019,8 @@ export async function getTicketDetail(
           notes: true,
           createdAt: true,
           updatedAt: true,
-          paymentReversal: {
+          paymentReversals: {
+            orderBy: { createdAt: 'asc' },
             select: {
               id: true,
               amount: true,
@@ -1529,6 +1586,72 @@ export async function createPayment(
   });
 }
 
+export async function createPaymentReversal(
+  companyId: string,
+  branchId: string,
+  ticketId: string,
+  paymentId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: CreatePaymentReversalInput,
+) {
+  await ensureSensitiveTicketActionAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
+    ensureTicketOpen(ticket);
+
+    const payment = await ensurePaymentInTicket(tx, ticketId, paymentId);
+    const summary = buildPaymentReversalSummary(payment);
+
+    if (input.amount > summary.remainingReversibleAmount + 0.000001) {
+      throw new AppError(409, 'Reversal amount exceeds remaining reversible amount');
+    }
+
+    const reversal = await tx.paymentReversal.create({
+      data: {
+        companyId,
+        ticketId,
+        paymentId,
+        amount: toDecimal(input.amount),
+        reason: input.reason,
+        createdById: userId,
+      },
+      select: {
+        id: true,
+        companyId: true,
+        ticketId: true,
+        paymentId: true,
+        amount: true,
+        reason: true,
+        createdById: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    const updatedPayment = await ensurePaymentInTicket(tx, ticketId, paymentId);
+    const paymentSummary = buildPaymentReversalSummary(updatedPayment);
+    const totals = await getTicketFinancialSummary(tx, ticketId);
+
+    return {
+      reversal,
+      payment: {
+        id: updatedPayment.id,
+        companyId: updatedPayment.companyId,
+        ticketId: updatedPayment.ticketId,
+        method: updatedPayment.method,
+        amount: updatedPayment.amount,
+        notes: updatedPayment.notes,
+        createdAt: updatedPayment.createdAt,
+        updatedAt: updatedPayment.updatedAt,
+      },
+      paymentSummary,
+      totals,
+    };
+  });
+}
+
 export async function closeTicket(
   companyId: string,
   branchId: string,
@@ -1600,8 +1723,12 @@ export async function cancelTicketWithReversal(
         notes: true,
         createdAt: true,
         updatedAt: true,
-        paymentReversal: {
-          select: { id: true },
+        paymentReversals: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            amount: true,
+          },
         },
       },
     });
@@ -1610,20 +1737,27 @@ export async function cancelTicketWithReversal(
       throw new AppError(409, 'Ticket has no payments to reverse in this flow');
     }
 
-    if (payments.some((payment) => payment.paymentReversal)) {
-      throw new AppError(409, 'At least one payment already has a reversal');
+    const reversiblePayments = payments
+      .map((payment) => ({
+        payment,
+        summary: buildPaymentReversalSummary(payment),
+      }))
+      .filter(({ summary }) => summary.remainingReversibleAmount > 0.000001);
+
+    if (reversiblePayments.length === 0) {
+      throw new AppError(409, 'Ticket has no remaining reversible amount in this flow');
     }
 
     const now = new Date();
 
     const paymentReversals = await Promise.all(
-      payments.map((payment) =>
+      reversiblePayments.map(({ payment, summary }) =>
         tx.paymentReversal.create({
           data: {
             companyId,
             ticketId,
             paymentId: payment.id,
-            amount: payment.amount,
+            amount: toDecimal(summary.remainingReversibleAmount),
             reason: input.reason,
             createdById: userId,
           },
@@ -1667,7 +1801,7 @@ export async function cancelTicketWithReversal(
 
     return {
       ticket: cancelledTicket,
-      payments: payments.map(({ paymentReversal, ...payment }) => payment),
+      payments: payments.map(({ paymentReversals, ...payment }) => payment),
       paymentReversals,
       totals,
     };

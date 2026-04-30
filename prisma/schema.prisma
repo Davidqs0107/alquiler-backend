@@ -322,17 +322,17 @@ model RentalSession {
 }
 
 model Payment {
-  id             String           @id @default(cuid())
-  companyId      String
-  ticketId       String
-  method         PaymentMethod
-  amount         Decimal          @db.Decimal(12, 2)
-  notes          String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  ticket         Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  paymentReversal PaymentReversal?
+  id               String            @id @default(cuid())
+  companyId        String
+  ticketId         String
+  method           PaymentMethod
+  amount           Decimal           @db.Decimal(12, 2)
+  notes            String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ticket           Ticket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  paymentReversals PaymentReversal[]
 
   @@index([companyId])
   @@index([ticketId])
@@ -342,7 +342,7 @@ model PaymentReversal {
   id          String   @id @default(cuid())
   companyId   String
   ticketId    String
-  paymentId   String   @unique
+  paymentId   String
   amount      Decimal  @db.Decimal(12, 2)
   reason      String
   createdById String
@@ -355,6 +355,7 @@ model PaymentReversal {
 
   @@index([companyId])
   @@index([ticketId])
+  @@index([paymentId])
   @@index([createdById])
 }
 

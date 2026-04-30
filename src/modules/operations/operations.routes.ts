@@ -14,6 +14,7 @@ import {
   closeTicketHandler,
   createCatalogItemHandler,
   createPaymentHandler,
+  createPaymentReversalHandler,
   createTicketHandler,
   deactivateCatalogItemHandler,
   finishRentalHandler,
@@ -48,4 +49,5 @@ operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketI
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/cancel-with-reversal', cancelTicketWithReversalHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/rentals/:rentalSessionId/finish', finishRentalHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/payments', createPaymentHandler);
+operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/payments/:paymentId/reversals', createPaymentReversalHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/close', closeTicketHandler);

@@ -54,6 +54,11 @@ export const createPaymentSchema = z.object({
   notes: z.string().trim().min(1).optional(),
 });
 
+export const createPaymentReversalSchema = z.object({
+  amount: z.coerce.number().positive(),
+  reason: z.string().trim().min(1),
+});
+
 export const addCatalogItemToTicketSchema = z.object({
   catalogItemId: z.string().trim().min(1),
   quantity: z.coerce.number().positive(),

@@ -12,6 +12,7 @@ import {
   closeTicketSchema,
   createCatalogItemSchema,
   createPaymentSchema,
+  createPaymentReversalSchema,
   createTicketSchema,
   deactivateCatalogItemSchema,
   finishRentalSchema,
@@ -359,6 +360,28 @@ export async function createPaymentHandler(req: Request, res: Response, next: Ne
       companyId,
       branchId,
       ticketId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.status(201).json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function createPaymentReversalHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const ticketId = String(req.params.ticketId);
+    const paymentId = String(req.params.paymentId);
+    const body = createPaymentReversalSchema.parse(req.body);
+    const result = await operationsService.createPaymentReversal(
+      companyId,
+      branchId,
+      ticketId,
+      paymentId,
       req.auth!.userId,
       req.auth!.globalRole,
       body,

@@ -89,6 +89,8 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - cancelar ticket completo con pagos
 - generar reverso por cada pago asociado
 - exponer lectura financiera con `paidGrossTotal`, `reversedTotal` y `paidNetTotal`
+- reversos parciales por pago específico
+- múltiples reversos parciales por pago hasta agotar remanente reversible
 
 ### 8. Tests automatizados fase 1
 - runner de tests con `tsx --test`
@@ -152,6 +154,8 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - catálogo se puede activar/inactivar sin borrar trazabilidad
 - listado de catálogo soporta filtros por estado, sede, tipo y búsqueda textual
 - cancelación avanzada de ticket con pagos crea reversos dedicados por pago
+- pagos permiten múltiples reversos parciales acumulados
+- el sistema rechaza reversos que excedan el remanente reversible del pago
 - pagos originales se preservan y no se mutan para reversar
 - lectura financiera del ticket distingue pagado bruto, reversado y pagado neto
 - `SUPERADMIN`, `ADMIN_EMPRESA`, `ADMIN_SEDE`, `CAJERO` y `RECEPCION` operan el módulo operacional según alcance
@@ -195,34 +199,25 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-30-operations-sales-happy-path-tests-phase6-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-simple-cancellations-tests-phase7-design.md`
 - `docs/superpowers/specs/2026-04-30-operations-catalog-filters-tests-phase8-design.md`
+- `docs/superpowers/specs/2026-04-30-partial-payment-reversals-design.md`
 
 ## Último punto alcanzado
-Se diseñó, implementó y validó la octava tanda corta de tests automatizados para filtros de catálogo del módulo `operations`.
+Se diseñó e implementó soporte para reversos parciales por pago específico.
 
-Se agregó cobertura para lectura con:
-- `status`
-- `type`
-- `branchId`
-- `search`
-- combinación simple de filtros
+Se agregó:
+- migración Prisma para permitir múltiples `PaymentReversal` por `paymentId`
+- endpoint `POST /companies/:companyId/branches/:branchId/tickets/:ticketId/payments/:paymentId/reversals`
+- validación de remanente reversible por pago
+- actualización de lecturas financieras para sumar múltiples reversos por pago
+- adaptación de cancelación completa para reversar sólo el remanente faltante de cada pago
 
-La suite automatizada quedó validada exitosamente cubriendo además:
-1. filtro por `status`
-2. filtro por `type`
-3. filtro por `branchId` devuelve globales + sede pedida
-4. filtro por `branchId` excluye ítems de otra sede
-5. `search` parcial case-insensitive
-6. combinación simple de filtros
-7. validación HTTP de `branchId`
-8. validación HTTP de `status + type`
-9. validación HTTP de `search`
-10. compilación correcta con `npm run build`
+La implementación quedó compilando correctamente con `npm run build`.
 
 ## Próximo paso recomendado
 Continuar con una de estas rutas:
-- ampliar cobertura automatizada a edición y activación/inactivación de catálogo
-- reversos parciales o por pago individual en una fase posterior
 - cancelación avanzada de alquileres ya iniciados/finalizados
+- edición y activación/inactivación de catálogo
+- bloque final de tests automatizados para reversos parciales y cierre de cobertura
 
 ## Nota para retomar
 Al volver, revisar primero:
