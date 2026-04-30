@@ -180,7 +180,8 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `57a3f55` feat: add phase 2 catalog discounts and cancellations
 - `d6a3770` feat: add catalog maintenance endpoints and filters
 - `fe24353` feat: add ticket cancellation with payment reversals
-- `149a83e` docs: add operations tests phase 1 design spec
+- `8a93902` feat: add partial payment reversals
+- `7401bc5` feat: add rental session cancellation with reversals
 
 ## Specs escritas
 - `docs/superpowers/specs/2026-04-29-app-alquileres-design.md`
@@ -222,6 +223,10 @@ Continuar con una de estas rutas:
 - bloque final de tests automatizados para reversos parciales, cancelación de rentals y cierre de cobertura
 - mejoras operativas posteriores según feedback funcional
 
+Recomendación concreta para retomar:
+1. editar/activar/inactivar catálogo
+2. luego hacer el bloque final de tests
+
 ## Nota para retomar
 Al volver, revisar primero:
 1. que Docker siga levantado
@@ -235,6 +240,6 @@ Al volver, revisar primero:
    - mantenimiento de catálogo
    - cancelación con reversos
 7. decidir si el siguiente bloque será:
-   - ampliar tests automatizados
-   - reversos más finos
-   - cancelaciones operativas de alquiler
+   - edición y activación/inactivación de catálogo
+   - bloque final de tests automatizados
+   - mejoras operativas posteriores
