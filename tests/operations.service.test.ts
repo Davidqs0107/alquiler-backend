@@ -2,6 +2,7 @@ import './setup';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AppError } from '../src/middlewares/error.middleware';
+import { prisma } from '../src/lib/prisma';
 import * as operationsService from '../src/modules/operations/operations.service';
 import {
   createBranch,
@@ -728,5 +729,272 @@ describe('operations service permissions', () => {
       }),
       (error: unknown) => error instanceof AppError && error.statusCode === 403,
     );
+  });
+});
+
+describe('operations service partial payment reversals', () => {
+  it('creates partial reversal and updates payment summary', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 100,
+    });
+
+    const detail = await operationsService.getTicketDetail(company.id, branch.id, ticket.id, user.id, user.globalRole);
+    const payment = detail.payments[0];
+
+    const result = await operationsService.createPaymentReversal(
+      company.id,
+      branch.id,
+      ticket.id,
+      payment.id,
+      user.id,
+      user.globalRole,
+      { amount: 30, reason: 'Partial refund' },
+    );
+
+    assert.equal(Number(result.reversal.amount), 30);
+    assert.equal(result.reversal.paymentId, payment.id);
+    assert.equal(Number(result.paymentSummary.originalAmount), 100);
+    assert.equal(Number(result.paymentSummary.reversedAmount), 30);
+    assert.equal(Number(result.paymentSummary.remainingReversibleAmount), 70);
+  });
+
+  it('rejects reversal that exceeds remaining amount', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 100,
+    });
+
+    const detail = await operationsService.getTicketDetail(company.id, branch.id, ticket.id, user.id, user.globalRole);
+    const payment = detail.payments[0];
+
+    await assert.rejects(
+      operationsService.createPaymentReversal(
+        company.id,
+        branch.id,
+        ticket.id,
+        payment.id,
+        user.id,
+        user.globalRole,
+        { amount: 150, reason: 'Too much' },
+      ),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+
+  it('accumulates multiple partial reversals correctly', async () => {
+    const { user, company, branch } = await createOperationsContext();
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 100,
+    });
+
+    const detail = await operationsService.getTicketDetail(company.id, branch.id, ticket.id, user.id, user.globalRole);
+    const payment = detail.payments[0];
+
+    await operationsService.createPaymentReversal(
+      company.id,
+      branch.id,
+      ticket.id,
+      payment.id,
+      user.id,
+      user.globalRole,
+      { amount: 40, reason: 'First partial' },
+    );
+
+    const second = await operationsService.createPaymentReversal(
+      company.id,
+      branch.id,
+      ticket.id,
+      payment.id,
+      user.id,
+      user.globalRole,
+      { amount: 30, reason: 'Second partial' },
+    );
+
+    assert.equal(Number(second.paymentSummary.reversedAmount), 70);
+    assert.equal(Number(second.paymentSummary.remainingReversibleAmount), 30);
+  });
+});
+
+describe('operations service rental session cancellation', () => {
+  it('cancels RESERVED rental session and creates reversals', async () => {
+    const { user, company, branch, resource } = await createOperationsContext();
+
+    const started = await operationsService.startRental(company.id, branch.id, user.id, user.globalRole, {
+      resourceId: resource.id,
+      reservedMinutes: 60,
+      startAt: new Date('2026-04-30T10:00:00.000Z'),
+    });
+
+    await operationsService.createPayment(company.id, branch.id, started.ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: Number(started.rentalSession.totalAmount),
+    });
+
+    const result = await operationsService.cancelRentalSession(
+      company.id,
+      branch.id,
+      started.rentalSession.id,
+      user.id,
+      user.globalRole,
+      { reason: 'Customer request' },
+    );
+
+    assert.equal(result.rentalSession.status, 'CANCELLED');
+    assert.ok(result.ticketItem.cancelledAt);
+    assert.ok(result.paymentReversals.length > 0);
+    assert.equal(Number(result.totals.reversedTotal) > 0, true);
+  });
+
+  it('cancels FINISHED rental session and creates reversals', async () => {
+    const { user, company, branch, resource } = await createOperationsContext();
+
+    const started = await operationsService.startRental(company.id, branch.id, user.id, user.globalRole, {
+      resourceId: resource.id,
+      reservedMinutes: 60,
+      startAt: new Date('2026-04-30T10:00:00.000Z'),
+    });
+
+    const finished = await operationsService.finishRental(
+      company.id,
+      branch.id,
+      started.rentalSession.id,
+      user.id,
+      user.globalRole,
+      { endedAt: new Date('2026-04-30T11:00:00.000Z') },
+    );
+
+    await operationsService.createPayment(company.id, branch.id, finished.ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: Number(finished.rentalSession.totalAmount),
+    });
+
+    const result = await operationsService.cancelRentalSession(
+      company.id,
+      branch.id,
+      finished.rentalSession.id,
+      user.id,
+      user.globalRole,
+      { reason: 'Customer request' },
+    );
+
+    assert.equal(result.rentalSession.status, 'CANCELLED');
+    assert.ok(result.ticketItem.cancelledAt);
+  });
+
+  it('rejects cancellation of IN_USE rental session', async () => {
+    const { user, company, branch, resource } = await createOperationsContext();
+
+    const started = await operationsService.startRental(company.id, branch.id, user.id, user.globalRole, {
+      resourceId: resource.id,
+      reservedMinutes: 60,
+      startAt: new Date('2026-04-30T10:00:00.000Z'),
+    });
+
+    const inUseSession = await prisma.rentalSession.update({
+      where: { id: started.rentalSession.id },
+      data: { status: 'IN_USE' },
+    });
+
+    await assert.rejects(
+      operationsService.cancelRentalSession(
+        company.id,
+        branch.id,
+        inUseSession.id,
+        user.id,
+        user.globalRole,
+        { reason: 'Should fail' },
+      ),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+
+  it('rejects cancellation of already cancelled rental', async () => {
+    const { user, company, branch, resource } = await createOperationsContext();
+
+    const started = await operationsService.startRental(company.id, branch.id, user.id, user.globalRole, {
+      resourceId: resource.id,
+      reservedMinutes: 60,
+      startAt: new Date('2026-04-30T10:00:00.000Z'),
+    });
+
+    await operationsService.cancelRentalSession(
+      company.id,
+      branch.id,
+      started.rentalSession.id,
+      user.id,
+      user.globalRole,
+      { reason: 'First cancellation' },
+    );
+
+    await assert.rejects(
+      operationsService.cancelRentalSession(
+        company.id,
+        branch.id,
+        started.rentalSession.id,
+        user.id,
+        user.globalRole,
+        { reason: 'Should fail' },
+      ),
+      (error: unknown) => error instanceof AppError && error.statusCode === 409,
+    );
+  });
+
+  it('recalculates ticket after rental cancellation', async () => {
+    const { user, company, branch, resource } = await createOperationsContext();
+
+    const started = await operationsService.startRental(company.id, branch.id, user.id, user.globalRole, {
+      resourceId: resource.id,
+      reservedMinutes: 60,
+      startAt: new Date('2026-04-30T10:00:00.000Z'),
+    });
+
+    const totalBefore = Number(started.ticket.total);
+
+    await operationsService.createPayment(company.id, branch.id, started.ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: totalBefore,
+    });
+
+    await operationsService.cancelRentalSession(
+      company.id,
+      branch.id,
+      started.rentalSession.id,
+      user.id,
+      user.globalRole,
+      { reason: 'Customer request' },
+    );
+
+    const detail = await operationsService.getTicketDetail(company.id, branch.id, started.ticket.id, user.id, user.globalRole);
+
+    assert.equal(Number(detail.total), 0);
+    assert.equal(detail.status, 'OPEN');
   });
 });

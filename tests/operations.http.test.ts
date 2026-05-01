@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import request from 'supertest';
 import { PaymentMethod, GlobalRole, MembershipRole } from '@prisma/client';
 import { createApp } from '../src/app';
+import { prisma } from '../src/lib/prisma';
 import * as operationsService from '../src/modules/operations/operations.service';
 import { signAccessToken } from '../src/utils/jwt';
 import {
@@ -583,5 +584,171 @@ describe('operations http permissions', () => {
 
     assert.equal(response.status, 200);
     assert.equal(response.body.ticket.status, 'CANCELLED');
+  });
+});
+
+describe('operations http partial payment reversals', () => {
+  it('creates partial payment reversal through endpoint', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 100,
+    });
+
+    const detail = await operationsService.getTicketDetail(company.id, branch.id, ticket.id, user.id, user.globalRole);
+    const payment = detail.payments[0];
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticket.id}/payments/${payment.id}/reversals`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ amount: 30, reason: 'Partial refund' });
+
+    assert.equal(response.status, 201);
+    assert.equal(Number(response.body.reversal.amount), 30);
+    assert.equal(response.body.reversal.paymentId, payment.id);
+    assert.equal(Number(response.body.paymentSummary.originalAmount), 100);
+    assert.equal(Number(response.body.paymentSummary.reversedAmount), 30);
+    assert.equal(Number(response.body.paymentSummary.remainingReversibleAmount), 70);
+  });
+
+  it('rejects reversal exceeding remaining amount', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const ticket = await operationsService.createTicket(company.id, branch.id, user.id, user.globalRole);
+
+    await operationsService.addManualItemToTicket(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      description: 'Item',
+      quantity: 1,
+      unitPrice: 100,
+    });
+
+    await operationsService.createPayment(company.id, branch.id, ticket.id, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: 100,
+    });
+
+    const detail = await operationsService.getTicketDetail(company.id, branch.id, ticket.id, user.id, user.globalRole);
+    const payment = detail.payments[0];
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/tickets/${ticket.id}/payments/${payment.id}/reversals`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ amount: 150, reason: 'Too much' });
+
+    assert.equal(response.status, 409);
+  });
+});
+
+describe('operations http rental session cancellation', () => {
+  it('cancels RESERVED rental session through endpoint', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const category = await createResourceCategory({ companyId: company.id });
+    const resource = await createResource({ companyId: company.id, branchId: branch.id, resourceCategoryId: category.id });
+    await createRatePlan({ companyId: company.id, branchId: branch.id, basePrice: 100, timeUnitMinutes: 60 });
+
+    const startResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/start`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ resourceId: resource.id, reservedMinutes: 60 });
+
+    const ticketId = startResponse.body.ticket.id;
+    const rentalSessionId = startResponse.body.rentalSession.id;
+
+    await operationsService.createPayment(company.id, branch.id, ticketId, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: Number(startResponse.body.rentalSession.totalAmount),
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/${rentalSessionId}/cancel`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ reason: 'Customer request' });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.rentalSession.status, 'CANCELLED');
+    assert.ok(response.body.ticketItem.cancelledAt);
+    assert.ok(response.body.paymentReversals.length > 0);
+  });
+
+  it('cancels FINISHED rental session through endpoint', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const category = await createResourceCategory({ companyId: company.id });
+    const resource = await createResource({ companyId: company.id, branchId: branch.id, resourceCategoryId: category.id });
+    await createRatePlan({ companyId: company.id, branchId: branch.id, basePrice: 100, timeUnitMinutes: 60 });
+
+    const startResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/start`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ resourceId: resource.id, reservedMinutes: 60, startAt: '2026-04-30T10:00:00.000Z' });
+
+    const ticketId = startResponse.body.ticket.id;
+    const rentalSessionId = startResponse.body.rentalSession.id;
+
+    const finishResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/${rentalSessionId}/finish`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ endedAt: '2026-04-30T11:00:00.000Z' });
+
+    await operationsService.createPayment(company.id, branch.id, ticketId, user.id, user.globalRole, {
+      method: PaymentMethod.CASH,
+      amount: Number(finishResponse.body.rentalSession.totalAmount),
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/${rentalSessionId}/cancel`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ reason: 'Customer request' });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.rentalSession.status, 'CANCELLED');
+    assert.ok(response.body.ticketItem.cancelledAt);
+  });
+
+  it('rejects cancellation of IN_USE rental session', async () => {
+    const app = createApp();
+    const user = await createUser({ globalRole: GlobalRole.SUPERADMIN });
+    const company = await createCompany();
+    const branch = await createBranch({ companyId: company.id });
+    const category = await createResourceCategory({ companyId: company.id });
+    const resource = await createResource({ companyId: company.id, branchId: branch.id, resourceCategoryId: category.id });
+    await createRatePlan({ companyId: company.id, branchId: branch.id, basePrice: 100, timeUnitMinutes: 60 });
+
+    const startResponse = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/start`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ resourceId: resource.id, reservedMinutes: 60 });
+
+    const rentalSessionId = startResponse.body.rentalSession.id;
+
+    await prisma.rentalSession.update({
+      where: { id: rentalSessionId },
+      data: { status: 'IN_USE' },
+    });
+
+    const response = await request(app)
+      .post(`/companies/${company.id}/branches/${branch.id}/rentals/${rentalSessionId}/cancel`)
+      .set('Authorization', authHeaderFor(user))
+      .send({ reason: 'Should fail' });
+
+    assert.equal(response.status, 409);
   });
 });

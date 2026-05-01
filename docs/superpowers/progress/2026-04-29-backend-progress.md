@@ -134,6 +134,19 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - validación de `status`, `type`, `branchId` y `search`
 - cobertura de combinación simple de filtros y scoping global/sede
 
+### 16. Tests automatizados fase 9 reversos parciales por pago
+- reverso parcial por pago específico creado y validado
+- acumulación de múltiples reversos parciales por pago
+- rechazo cuando el monto excede el remanente reversible
+- validación de `paymentSummary` con `originalAmount`, `reversedAmount` y `remainingReversibleAmount`
+
+### 17. Tests automatizados fase 10 cancelación de sesiones rental con reversos
+- cancelación de sesión `RESERVED` con reversos automáticos FIFO
+- cancelación de sesión `FINISHED` con reversos automáticos
+- rechazo de cancelación de sesión `IN_USE`
+- rechazo de doble cancelación de rental
+- recálculo correcto del ticket después de cancelación
+
 ## Reglas ya aplicadas
 - categorías por empresa
 - visibles en todas las sedes por defecto
@@ -205,41 +218,39 @@ Todo quedó validado con smoke tests manuales, `npm test` y compilando correctam
 - `docs/superpowers/specs/2026-04-30-rental-session-cancellation-with-reversals-design.md`
 
 ## Último punto alcanzado
-Se diseñó e implementó la cancelación avanzada de sesiones de alquiler con reversos automáticos FIFO.
+Se completaron los tests automatizados para reversos parciales por pago y cancelación de sesiones rental con reversos.
 
 Se agregó:
-- endpoint `POST /companies/:companyId/branches/:branchId/rentals/:rentalSessionId/cancel`
-- cancelación de sesiones `RESERVED` y `FINISHED`
-- cancelación lógica de `RentalSession` y `TicketItem`
-- cálculo del neto cancelable de la línea rental
-- reversos automáticos sobre pagos reversables del ticket en orden FIFO
-- rechazo si no existe saldo reversible suficiente
+- tests de servicio para `createPaymentReversal`: reverso parcial, rechazo por exceder remanente, acumulación de múltiples reversos
+- tests HTTP para `createPaymentReversal`: endpoint funcional y rechazo correcto
+- tests de servicio para `cancelRentalSession`: cancelación `RESERVED` y `FINISHED`, rechazos por `IN_USE` y doble cancelación, recálculo de ticket
+- tests HTTP para `cancelRentalSession`: endpoints funcionales para cancelar sesiones y rechazo de `IN_USE`
 
-La implementación quedó compilando correctamente con `npm run build`.
+Total: **59 tests passing**, `npm run build` pasando.
 
 ## Próximo paso recomendado
-Continuar con una de estas rutas:
-- edición y activación/inactivación de catálogo
-- bloque final de tests automatizados para reversos parciales, cancelación de rentals y cierre de cobertura
-- mejoras operativas posteriores según feedback funcional
+Todas las fases diseñadas están ahora implementadas y probadas. El proyecto tiene una base sólida de tests cubriendo:
 
-Recomendación concreta para retomar:
-1. editar/activar/inactivar catálogo
-2. luego hacer el bloque final de tests
+- Operaciones críticas (overlap, pagos, cierres)
+- Permisos y roles
+- Happy paths de rental y venta
+- Overtime
+- Descuentos
+- Cancelaciones simples
+- Filtros de catálogo
+- Reversos parciales por pago
+- Cancelación de sesiones rental con reversos
+
+Opciones para continuar:
+- agregar más cobertura de tests si se requiere
+- smoke tests manuales de las funcionalidades implementadas
+- mejoras operativas según feedback funcional
+- iniciar el frontend del proyecto
 
 ## Nota para retomar
 Al volver, revisar primero:
-1. que Docker siga levantado
-2. que Prisma esté migrado
-3. que el servidor arranque con `npm run dev`
-4. correr `npm test`
-5. correr `npm run build`
-6. si hace falta, reprobar smoke tests manuales de:
-   - fase 1 operaciones
-   - fase 2 operaciones
-   - mantenimiento de catálogo
-   - cancelación con reversos
-7. decidir si el siguiente bloque será:
-   - edición y activación/inactivación de catálogo
-   - bloque final de tests automatizados
-   - mejoras operativas posteriores
+1. que la base de datos esté corriendo (verificar contenedor Docker)
+2. que el servidor arranque con `npm run dev`
+3. correr `npm test` para validar que los 59 tests pasen
+4. correr `npm run build` para verificar compilación
+5. hacer smoke test manual del flujo más usado si se desea
