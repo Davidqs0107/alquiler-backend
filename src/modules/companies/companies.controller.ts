@@ -125,3 +125,18 @@ export async function listBranchMembersHandler(req: Request, res: Response, next
     return next(error);
   }
 }
+
+export async function listBranchesHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branches = await companiesService.listBranches(
+      companyId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+    );
+
+    return res.json(branches);
+  } catch (error) {
+    return next(error);
+  }
+}

@@ -9,6 +9,7 @@ import {
   createCompanyMemberHandler,
   getCompanyByIdHandler,
   listBranchMembersHandler,
+  listBranchesHandler,
   listCompaniesHandler,
   listCompanyMembersHandler,
 } from './companies.controller';
@@ -23,5 +24,6 @@ companiesRouter.post('/:companyId/members', createCompanyMemberHandler);
 companiesRouter.post('/:companyId/branches/:branchId/members', createBranchMemberHandler);
 companiesRouter.get('/', listCompaniesHandler);
 companiesRouter.get('/:companyId', getCompanyByIdHandler);
+companiesRouter.get('/:companyId/branches', listBranchesHandler);
 companiesRouter.get('/:companyId/members', listCompanyMembersHandler);
 companiesRouter.get('/:companyId/branches/:branchId/members', listBranchMembersHandler);

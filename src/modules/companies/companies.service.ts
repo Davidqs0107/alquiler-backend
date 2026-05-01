@@ -423,10 +423,10 @@ export async function listCompanyMembers(companyId: string, actorUserId: string,
 export async function listBranchMembers(
   companyId: string,
   branchId: string,
-  actorUserId: string,
-  actorGlobalRole: GlobalRole,
+  userId: string,
+  globalRole: GlobalRole,
 ) {
-  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
+  await ensureCompanyAccess(companyId, userId, globalRole);
   await ensureBranchInCompany(companyId, branchId);
 
   return prisma.branchUser.findMany({
@@ -451,6 +451,23 @@ export async function listBranchMembers(
           updatedAt: true,
         },
       },
+    },
+  });
+}
+
+export async function listBranches(companyId: string, userId: string, globalRole: GlobalRole) {
+  await ensureCompanyAccess(companyId, userId, globalRole);
+
+  return prisma.branch.findMany({
+    where: { companyId },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      companyId: true,
+      name: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
     },
   });
 }
