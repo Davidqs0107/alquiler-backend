@@ -115,32 +115,59 @@ export async function createCategory(companyId: string, userId: string, globalRo
   });
 }
 
-export async function listCategories(companyId: string, userId: string, globalRole: GlobalRole) {
+type ListQueryOptions = {
+  limit?: number;
+  offset?: number;
+};
+
+export async function listCategories(
+  companyId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  query: ListQueryOptions = {},
+) {
   await ensureCompanyAccess(companyId, userId, globalRole);
 
-  return prisma.resourceCategory.findMany({
-    where: {
-      companyId,
-      status: RecordStatus.ACTIVE,
-    },
-    orderBy: { createdAt: 'asc' },
-    select: {
-      id: true,
-      companyId: true,
-      name: true,
-      status: true,
-      createdAt: true,
-      updatedAt: true,
-      visibilityOverrides: {
-        select: {
-          branchId: true,
-          isVisible: true,
-          updatedAt: true,
-        },
-        orderBy: { updatedAt: 'desc' },
+  const [categories, total] = await Promise.all([
+    prisma.resourceCategory.findMany({
+      where: {
+        companyId,
+        status: RecordStatus.ACTIVE,
       },
-    },
-  });
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        companyId: true,
+        name: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        visibilityOverrides: {
+          select: {
+            branchId: true,
+            isVisible: true,
+            updatedAt: true,
+          },
+          orderBy: { updatedAt: 'desc' },
+        },
+      },
+      take: query.limit,
+      skip: query.offset,
+    }),
+    prisma.resourceCategory.count({
+      where: {
+        companyId,
+        status: RecordStatus.ACTIVE,
+      },
+    }),
+  ]);
+
+  return {
+    data: categories,
+    total,
+    limit: query.limit ?? null,
+    offset: query.offset ?? null,
+  };
 }
 
 export async function updateCategoryVisibility(
@@ -228,43 +255,63 @@ export async function createResource(
   });
 }
 
-export async function listResources(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
+export async function listResources(
+  companyId: string,
+  branchId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  query: ListQueryOptions = {},
+) {
   await ensureCompanyAccess(companyId, userId, globalRole);
   await ensureBranchInCompany(companyId, branchId);
 
-  return prisma.resource.findMany({
-    where: {
-      companyId,
-      branchId,
+  const where = {
+    companyId,
+    branchId,
+    status: RecordStatus.ACTIVE,
+    category: {
       status: RecordStatus.ACTIVE,
-      category: {
-        status: RecordStatus.ACTIVE,
-        visibilityOverrides: {
-          none: {
-            branchId,
-            isVisible: false,
+      visibilityOverrides: {
+        none: {
+          branchId,
+          isVisible: false,
+        },
+      },
+    },
+  };
+
+  const [resources, total] = await Promise.all([
+    prisma.resource.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        companyId: true,
+        branchId: true,
+        resourceCategoryId: true,
+        name: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
           },
         },
       },
-    },
-    orderBy: { createdAt: 'asc' },
-    select: {
-      id: true,
-      companyId: true,
-      branchId: true,
-      resourceCategoryId: true,
-      name: true,
-      status: true,
-      createdAt: true,
-      updatedAt: true,
-      category: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-    },
-  });
+      take: query.limit,
+      skip: query.offset,
+    }),
+    prisma.resource.count({ where }),
+  ]);
+
+  return {
+    data: resources,
+    total,
+    limit: query.limit ?? null,
+    offset: query.offset ?? null,
+  };
 }
 
 export async function createRatePlan(
@@ -324,17 +371,133 @@ export async function createRatePlan(
   });
 }
 
-export async function listRatePlans(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
+export async function listRatePlans(
+  companyId: string,
+  branchId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  query: ListQueryOptions = {},
+) {
   await ensureCompanyAccess(companyId, userId, globalRole);
   await ensureBranchInCompany(companyId, branchId);
 
-  return prisma.ratePlan.findMany({
+  const where = {
+    companyId,
+    branchId,
+    status: RecordStatus.ACTIVE,
+  };
+
+  const [ratePlans, total] = await Promise.all([
+    prisma.ratePlan.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        companyId: true,
+        branchId: true,
+        resourceCategoryId: true,
+        resourceId: true,
+        name: true,
+        pricingType: true,
+        basePrice: true,
+        timeUnitMinutes: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        resourceCategory: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        resource: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      take: query.limit,
+      skip: query.offset,
+    }),
+    prisma.ratePlan.count({ where }),
+  ]);
+
+  return {
+    data: ratePlans,
+    total,
+    limit: query.limit ?? null,
+    offset: query.offset ?? null,
+  };
+}
+
+export async function updateResourceStatus(
+  companyId: string,
+  branchId: string,
+  resourceId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  status: RecordStatus,
+) {
+  await ensureCompanyAccess(companyId, userId, globalRole);
+  await ensureBranchInCompany(companyId, branchId);
+
+  const resource = await prisma.resource.findFirst({
     where: {
+      id: resourceId,
       companyId,
       branchId,
-      status: RecordStatus.ACTIVE,
     },
-    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+
+  if (!resource) {
+    throw new AppError(404, 'Resource not found');
+  }
+
+  return prisma.resource.update({
+    where: { id: resourceId },
+    data: { status },
+    select: {
+      id: true,
+      companyId: true,
+      branchId: true,
+      resourceCategoryId: true,
+      name: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function updateRatePlanStatus(
+  companyId: string,
+  branchId: string,
+  ratePlanId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  status: RecordStatus,
+) {
+  await ensureCompanyAccess(companyId, userId, globalRole);
+  await ensureBranchInCompany(companyId, branchId);
+
+  const ratePlan = await prisma.ratePlan.findFirst({
+    where: {
+      id: ratePlanId,
+      companyId,
+      branchId,
+    },
+    select: { id: true },
+  });
+
+  if (!ratePlan) {
+    throw new AppError(404, 'Rate plan not found');
+  }
+
+  return prisma.ratePlan.update({
+    where: { id: ratePlanId },
+    data: { status },
     select: {
       id: true,
       companyId: true,
@@ -342,24 +505,9 @@ export async function listRatePlans(companyId: string, branchId: string, userId:
       resourceCategoryId: true,
       resourceId: true,
       name: true,
-      pricingType: true,
-      basePrice: true,
-      timeUnitMinutes: true,
       status: true,
       createdAt: true,
       updatedAt: true,
-      resourceCategory: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      resource: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
     },
   });
 }

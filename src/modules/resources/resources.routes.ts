@@ -8,6 +8,8 @@ import {
   listRatePlansHandler,
   listResourcesHandler,
   updateCategoryVisibilityHandler,
+  updateResourceStatusHandler,
+  updateRatePlanStatusHandler,
 } from './resources.controller';
 
 export const resourcesRouter = Router();
@@ -22,5 +24,13 @@ resourcesRouter.patch(
 );
 resourcesRouter.post('/companies/:companyId/branches/:branchId/resources', createResourceHandler);
 resourcesRouter.get('/companies/:companyId/branches/:branchId/resources', listResourcesHandler);
+resourcesRouter.patch(
+  '/companies/:companyId/branches/:branchId/resources/:resourceId/status',
+  updateResourceStatusHandler,
+);
 resourcesRouter.post('/companies/:companyId/branches/:branchId/rate-plans', createRatePlanHandler);
 resourcesRouter.get('/companies/:companyId/branches/:branchId/rate-plans', listRatePlansHandler);
+resourcesRouter.patch(
+  '/companies/:companyId/branches/:branchId/rate-plans/:ratePlanId/status',
+  updateRatePlanStatusHandler,
+);

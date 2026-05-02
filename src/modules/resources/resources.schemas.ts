@@ -1,12 +1,35 @@
-import { PricingType } from '@prisma/client';
+import { PricingType, RecordStatus } from '@prisma/client';
 import { z } from 'zod';
 
 export const createCategorySchema = z.object({
   name: z.string().trim().min(1),
 });
 
+export const listCategoriesQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
+});
+
+export const listResourcesQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
+});
+
+export const listRatePlansQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
+});
+
 export const updateCategoryVisibilitySchema = z.object({
   isVisible: z.boolean(),
+});
+
+export const updateResourceStatusSchema = z.object({
+  status: z.nativeEnum(RecordStatus),
+});
+
+export const updateRatePlanStatusSchema = z.object({
+  status: z.nativeEnum(RecordStatus),
 });
 
 export const createResourceSchema = z.object({

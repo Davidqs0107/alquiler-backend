@@ -5,13 +5,8 @@ export const createTicketSchema = z.object({}).strict();
 
 export const listTicketsQuerySchema = z.object({
   status: z.nativeEnum(TicketStatus).optional(),
-});
-
-export const createCatalogItemSchema = z.object({
-  name: z.string().trim().min(1),
-  type: z.nativeEnum(CatalogItemType),
-  price: z.coerce.number().nonnegative(),
-  branchId: z.string().trim().min(1).optional(),
+  limit: z.coerce.number().int().positive().optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
 });
 
 export const listCatalogItemsQuerySchema = z.object({
@@ -19,6 +14,15 @@ export const listCatalogItemsQuerySchema = z.object({
   branchId: z.string().trim().min(1).optional(),
   type: z.nativeEnum(CatalogItemType).optional(),
   search: z.string().trim().min(1).optional(),
+  limit: z.coerce.number().int().positive().optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
+});
+
+export const createCatalogItemSchema = z.object({
+  name: z.string().trim().min(1),
+  type: z.nativeEnum(CatalogItemType),
+  price: z.coerce.number().nonnegative(),
+  branchId: z.string().trim().min(1).optional(),
 });
 
 export const updateCatalogItemSchema = z

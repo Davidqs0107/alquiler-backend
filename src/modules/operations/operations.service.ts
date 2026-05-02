@@ -16,6 +16,8 @@ import { ensureBranchInCompany } from '../companies/companies.access';
 
 type ListTicketsQuery = {
   status?: TicketStatus;
+  limit?: number;
+  offset?: number;
 };
 
 type ListCatalogItemsQuery = {
@@ -23,6 +25,8 @@ type ListCatalogItemsQuery = {
   branchId?: string;
   type?: CatalogItemType;
   search?: string;
+  limit?: number;
+  offset?: number;
 };
 
 type CreateCatalogItemInput = {
@@ -836,27 +840,47 @@ export async function listCatalogItems(
     await ensureBranchInCompany(companyId, query.branchId);
   }
 
-  return prisma.saleCatalogItem.findMany({
-    where: {
-      companyId,
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.type ? { type: query.type } : {}),
-      ...(query.search ? { name: { contains: query.search, mode: 'insensitive' } } : {}),
-      ...(query.branchId ? { OR: [{ branchId: null }, { branchId: query.branchId }] } : {}),
-    },
-    orderBy: [{ branchId: 'asc' }, { createdAt: 'asc' }],
-    select: {
-      id: true,
-      companyId: true,
-      branchId: true,
-      type: true,
-      name: true,
-      price: true,
-      status: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+  const [items, total] = await Promise.all([
+    prisma.saleCatalogItem.findMany({
+      where: {
+        companyId,
+        ...(query.status ? { status: query.status } : {}),
+        ...(query.type ? { type: query.type } : {}),
+        ...(query.search ? { name: { contains: query.search, mode: 'insensitive' } } : {}),
+        ...(query.branchId ? { OR: [{ branchId: null }, { branchId: query.branchId }] } : {}),
+      },
+      orderBy: [{ branchId: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        companyId: true,
+        branchId: true,
+        type: true,
+        name: true,
+        price: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      take: query.limit,
+      skip: query.offset,
+    }),
+    prisma.saleCatalogItem.count({
+      where: {
+        companyId,
+        ...(query.status ? { status: query.status } : {}),
+        ...(query.type ? { type: query.type } : {}),
+        ...(query.search ? { name: { contains: query.search, mode: 'insensitive' } } : {}),
+        ...(query.branchId ? { OR: [{ branchId: null }, { branchId: query.branchId }] } : {}),
+      },
+    }),
+  ]);
+
+  return {
+    data: items,
+    total,
+    limit: query.limit ?? null,
+    offset: query.offset ?? null,
+  };
 }
 
 export async function updateCatalogItem(
@@ -986,47 +1010,62 @@ export async function listTickets(
 ) {
   await ensureOperationsAccess(companyId, branchId, userId, globalRole);
 
-  const tickets = await prisma.ticket.findMany({
-    where: {
-      companyId,
-      branchId,
-      ...(query.status ? { status: query.status } : {}),
-    },
-    orderBy: [{ openedAt: 'desc' }, { ticketNumber: 'desc' }],
-    select: {
-      ...ticketSummarySelect,
-      payments: {
-        select: {
-          amount: true,
-          paymentReversals: {
-            select: {
-              amount: true,
+  const [tickets, total] = await Promise.all([
+    prisma.ticket.findMany({
+      where: {
+        companyId,
+        branchId,
+        ...(query.status ? { status: query.status } : {}),
+      },
+      orderBy: [{ openedAt: 'desc' }, { ticketNumber: 'desc' }],
+      select: {
+        ...ticketSummarySelect,
+        payments: {
+          select: {
+            amount: true,
+            paymentReversals: {
+              select: {
+                amount: true,
+              },
             },
           },
         },
       },
-    },
-  });
+      take: query.limit,
+      skip: query.offset,
+    }),
+    prisma.ticket.count({
+      where: {
+        companyId,
+        branchId,
+        ...(query.status ? { status: query.status } : {}),
+      },
+    }),
+  ]);
 
-  return tickets.map((ticket) => {
-    const paidGrossTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
-    const reversedTotal = ticket.payments.reduce(
-      (sum, payment) =>
-        sum + payment.paymentReversals.reduce((innerSum, reversal) => innerSum + decimalToNumber(reversal.amount), 0),
-      0,
-    );
-    const paidNetTotal = Math.max(paidGrossTotal - reversedTotal, 0);
-    const total = decimalToNumber(ticket.total);
+  return {
+    data: tickets.map((ticket) => {
+      const paidGrossTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
+      const reversedTotal = ticket.payments.reduce(
+        (sum, payment) =>
+          sum + payment.paymentReversals.reduce((innerSum, reversal) => innerSum + decimalToNumber(reversal.amount), 0),
+        0,
+      );
+      const paidNetTotal = Math.max(paidGrossTotal - reversedTotal, 0);
+      const total = decimalToNumber(ticket.total);
 
-    return {
-      ...ticket,
-      paidGrossTotal,
-      reversedTotal,
-      paidNetTotal,
-      paidTotal: paidNetTotal,
-      pendingAmount: Math.max(total - paidNetTotal, 0),
-    };
-  });
+      return {
+        ...ticket,
+        paidGrossTotal,
+        reversedTotal,
+        paidNetTotal,
+        pendingAmount: Math.max(total - paidNetTotal, 0),
+      };
+    }),
+    total,
+    limit: query.limit ?? null,
+    offset: query.offset ?? null,
+  };
 }
 
 export async function getTicketDetail(
