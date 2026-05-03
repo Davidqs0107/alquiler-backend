@@ -1860,13 +1860,28 @@ export async function closeTicket(
         companyId,
         branchId,
         ticketItem: { ticketId },
-        status: { in: [RentalSessionStatus.RESERVED, RentalSessionStatus.IN_USE] },
+        status: RentalSessionStatus.IN_USE,
       },
       select: { id: true },
     });
 
     if (activeSession) {
       throw new AppError(409, 'Ticket has active rental sessions');
+    }
+
+    const overdueSession = await tx.rentalSession.findFirst({
+      where: {
+        companyId,
+        branchId,
+        ticketItem: { ticketId },
+        status: RentalSessionStatus.RESERVED,
+        scheduledEndAt: { lt: new Date() },
+      },
+      select: { id: true },
+    });
+
+    if (overdueSession) {
+      throw new AppError(409, 'Ticket has overdue rental sessions. Cancel or finish them first.');
     }
 
     const financials = await getTicketFinancialSummary(tx, ticketId);

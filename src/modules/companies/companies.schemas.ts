@@ -1,4 +1,4 @@
-import { MembershipRole } from '@prisma/client';
+import { MembershipRole, RecordStatus } from '@prisma/client';
 import { z } from 'zod';
 
 const companyMembershipRoleSchema = z.union([
@@ -42,4 +42,26 @@ export const createBranchMemberSchema = z.object({
   password: z.string().min(6),
   companyRole: companyMembershipRoleSchema,
   branchRole: branchMembershipRoleSchema,
+});
+
+export const updateCompanySchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  slug: z.string().trim().min(1).toLowerCase().optional(),
+  status: z.nativeEnum(RecordStatus).optional(),
+});
+
+export const updateBranchSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  status: z.nativeEnum(RecordStatus).optional(),
+});
+
+export const updateCompanyMemberSchema = z.object({
+  role: companyMembershipRoleSchema.optional(),
+  status: z.nativeEnum(RecordStatus).optional(),
+});
+
+export const updateBranchMemberSchema = z.object({
+  role: branchMembershipRoleSchema.optional(),
+  status: z.nativeEnum(RecordStatus).optional(),
+  branchId: z.string().uuid().optional(),
 });

@@ -28,6 +28,26 @@ export const updateResourceStatusSchema = z.object({
   status: z.nativeEnum(RecordStatus),
 });
 
+export const updateCategorySchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+});
+
+export const updateResourceSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  resourceCategoryId: z.string().uuid().optional(),
+});
+
+export const updateRatePlanSchema = z.object({
+  name: z.string().min(1).optional(),
+  pricingType: z.nativeEnum(PricingType).optional(),
+  basePrice: z.coerce.number().nonnegative().optional(),
+  timeUnitMinutes: z.coerce.number().int().positive().optional(),
+  resourceId: z.string().uuid().nullable().optional(),
+  categoryId: z.string().uuid().nullable().optional(),
+});
+
 export const updateRatePlanStatusSchema = z.object({
   status: z.nativeEnum(RecordStatus),
 });

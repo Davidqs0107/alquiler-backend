@@ -12,6 +12,10 @@ import {
   listBranchesHandler,
   listCompaniesHandler,
   listCompanyMembersHandler,
+  updateBranchHandler,
+  updateBranchMemberHandler,
+  updateCompanyHandler,
+  updateCompanyMemberHandler,
 } from './companies.controller';
 
 export const companiesRouter = Router();
@@ -19,9 +23,13 @@ export const companiesRouter = Router();
 companiesRouter.use(authMiddleware);
 
 companiesRouter.post('/', requireGlobalRole(GlobalRole.SUPERADMIN), createCompanyHandler);
+companiesRouter.put('/:companyId', updateCompanyHandler);
 companiesRouter.post('/:companyId/branches', createBranchHandler);
+companiesRouter.put('/:companyId/branches/:branchId', updateBranchHandler);
 companiesRouter.post('/:companyId/members', createCompanyMemberHandler);
+companiesRouter.put('/:companyId/members/:membershipId', updateCompanyMemberHandler);
 companiesRouter.post('/:companyId/branches/:branchId/members', createBranchMemberHandler);
+companiesRouter.put('/:companyId/branches/:branchId/members/:membershipId', updateBranchMemberHandler);
 companiesRouter.get('/', listCompaniesHandler);
 companiesRouter.get('/:companyId', getCompanyByIdHandler);
 companiesRouter.get('/:companyId/branches', listBranchesHandler);

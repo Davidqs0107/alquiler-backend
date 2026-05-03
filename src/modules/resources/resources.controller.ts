@@ -6,7 +6,10 @@ import {
   listCategoriesQuerySchema,
   listRatePlansQuerySchema,
   listResourcesQuerySchema,
+  updateCategorySchema,
   updateCategoryVisibilitySchema,
+  updateRatePlanSchema,
+  updateResourceSchema,
   updateResourceStatusSchema,
   updateRatePlanStatusSchema,
 } from './resources.schemas';
@@ -28,6 +31,24 @@ export async function listCategoriesHandler(req: Request, res: Response, next: N
     const companyId = String(req.params.companyId);
     const query = listCategoriesQuerySchema.parse(req.query);
     const result = await resourcesService.listCategories(companyId, req.auth!.userId, req.auth!.globalRole, query);
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateCategoryHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const categoryId = String(req.params.categoryId);
+    const body = updateCategorySchema.parse(req.body);
+    const result = await resourcesService.updateCategory(
+      companyId,
+      categoryId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
     return res.json(result);
   } catch (error) {
     return next(error);
@@ -86,6 +107,26 @@ export async function listResourcesHandler(req: Request, res: Response, next: Ne
   }
 }
 
+export async function updateResourceHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const resourceId = String(req.params.resourceId);
+    const body = updateResourceSchema.parse(req.body);
+    const result = await resourcesService.updateResource(
+      companyId,
+      branchId,
+      resourceId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 export async function createRatePlanHandler(req: Request, res: Response, next: NextFunction) {
   try {
     const companyId = String(req.params.companyId);
@@ -130,6 +171,26 @@ export async function updateResourceStatusHandler(req: Request, res: Response, n
       req.auth!.userId,
       req.auth!.globalRole,
       body.status,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateRatePlanHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const ratePlanId = String(req.params.ratePlanId);
+    const body = updateRatePlanSchema.parse(req.body);
+    const result = await resourcesService.updateRatePlan(
+      companyId,
+      branchId,
+      ratePlanId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
     );
     return res.json(result);
   } catch (error) {

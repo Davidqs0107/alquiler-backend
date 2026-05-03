@@ -65,7 +65,7 @@ export const createPaymentReversalSchema = z.object({
 
 export const addCatalogItemToTicketSchema = z.object({
   catalogItemId: z.string().trim().min(1),
-  quantity: z.coerce.number().positive(),
+  quantity: z.coerce.number().positive().default(1),
 });
 
 const manualTicketItemBaseSchema = z.object({

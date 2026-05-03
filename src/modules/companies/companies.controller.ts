@@ -4,6 +4,10 @@ import {
   createBranchSchema,
   createCompanyMemberSchema,
   createCompanySchema,
+  updateCompanySchema,
+  updateBranchSchema,
+  updateCompanyMemberSchema,
+  updateBranchMemberSchema,
 } from './companies.schemas';
 import * as companiesService from './companies.service';
 
@@ -136,6 +140,78 @@ export async function listBranchesHandler(req: Request, res: Response, next: Nex
     );
 
     return res.json(branches);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateCompanyHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const body = updateCompanySchema.parse(req.body);
+    const result = await companiesService.updateCompany(
+      companyId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateBranchHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const body = updateBranchSchema.parse(req.body);
+    const result = await companiesService.updateBranch(
+      companyId,
+      branchId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateCompanyMemberHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const membershipId = String(req.params.membershipId);
+    const body = updateCompanyMemberSchema.parse(req.body);
+    const result = await companiesService.updateCompanyMember(
+      companyId,
+      membershipId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateBranchMemberHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const membershipId = String(req.params.membershipId);
+    const body = updateBranchMemberSchema.parse(req.body);
+    const result = await companiesService.updateBranchMember(
+      companyId,
+      branchId,
+      membershipId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
+    return res.json(result);
   } catch (error) {
     return next(error);
   }

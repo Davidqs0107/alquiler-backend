@@ -1,7 +1,7 @@
 import { GlobalRole, PricingType, RecordStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middlewares/error.middleware';
-import { ensureBranchInCompany, ensureCompanyAccess } from '../companies/companies.access';
+import { ensureBranchInCompany, ensureCompanyAccess, ensureCompanyMemberAccess } from '../companies/companies.access';
 
 type CreateCategoryInput = {
   name: string;
@@ -84,7 +84,7 @@ async function ensureCategoryVisibleInBranch(companyId: string, branchId: string
 }
 
 export async function createCategory(companyId: string, userId: string, globalRole: GlobalRole, input: CreateCategoryInput) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
+  await ensureCompanyMemberAccess(companyId, userId, globalRole);
 
   const existingCategory = await prisma.resourceCategory.findFirst({
     where: {
@@ -126,19 +126,19 @@ export async function listCategories(
   globalRole: GlobalRole,
   query: ListQueryOptions = {},
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
+  await ensureCompanyMemberAccess(companyId, userId, globalRole);
 
   const [categories, total] = await Promise.all([
     prisma.resourceCategory.findMany({
       where: {
         companyId,
-        status: RecordStatus.ACTIVE,
       },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
         companyId: true,
         name: true,
+        description: true,
         status: true,
         createdAt: true,
         updatedAt: true,
@@ -157,7 +157,6 @@ export async function listCategories(
     prisma.resourceCategory.count({
       where: {
         companyId,
-        status: RecordStatus.ACTIVE,
       },
     }),
   ]);
@@ -204,6 +203,49 @@ export async function updateCategoryVisibility(
       branchId: true,
       resourceCategoryId: true,
       isVisible: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+type UpdateCategoryInput = {
+  name?: string;
+  description?: string | null;
+};
+
+export async function updateCategory(
+  companyId: string,
+  categoryId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: UpdateCategoryInput,
+) {
+  await ensureCompanyMemberAccess(companyId, userId, globalRole);
+  const category = await ensureCategoryInCompany(companyId, categoryId);
+
+  if (input.name && input.name !== category.name) {
+    const existing = await prisma.resourceCategory.findFirst({
+      where: { companyId, name: input.name, id: { not: categoryId } },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError(409, 'Category name already exists in this company');
+    }
+  }
+
+  return prisma.resourceCategory.update({
+    where: { id: categoryId },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.description !== undefined && { description: input.description }),
+    },
+    select: {
+      id: true,
+      companyId: true,
+      name: true,
+      description: true,
+      status: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -262,13 +304,12 @@ export async function listResources(
   globalRole: GlobalRole,
   query: ListQueryOptions = {},
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
+  await ensureCompanyMemberAccess(companyId, userId, globalRole);
   await ensureBranchInCompany(companyId, branchId);
 
   const where = {
     companyId,
     branchId,
-    status: RecordStatus.ACTIVE,
     category: {
       status: RecordStatus.ACTIVE,
       visibilityOverrides: {
@@ -290,6 +331,7 @@ export async function listResources(
         branchId: true,
         resourceCategoryId: true,
         name: true,
+        description: true,
         status: true,
         createdAt: true,
         updatedAt: true,
@@ -384,7 +426,6 @@ export async function listRatePlans(
   const where = {
     companyId,
     branchId,
-    status: RecordStatus.ACTIVE,
   };
 
   const [ratePlans, total] = await Promise.all([
@@ -429,6 +470,59 @@ export async function listRatePlans(
     limit: query.limit ?? null,
     offset: query.offset ?? null,
   };
+}
+
+type UpdateResourceInput = {
+  name?: string;
+  description?: string | null;
+  resourceCategoryId?: string;
+};
+
+export async function updateResource(
+  companyId: string,
+  branchId: string,
+  resourceId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: UpdateResourceInput,
+) {
+  await ensureCompanyAccess(companyId, userId, globalRole);
+  await ensureBranchInCompany(companyId, branchId);
+  const resource = await ensureResourceInBranch(companyId, branchId, resourceId);
+
+  if (input.resourceCategoryId && input.resourceCategoryId !== resource.resourceCategoryId) {
+    await ensureCategoryInCompany(companyId, input.resourceCategoryId);
+  }
+
+  if (input.name && input.name !== resource.name) {
+    const existing = await prisma.resource.findFirst({
+      where: { branchId, name: input.name, id: { not: resourceId } },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError(409, 'Resource name already exists in this branch');
+    }
+  }
+
+  return prisma.resource.update({
+    where: { id: resourceId },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.description !== undefined && { description: input.description }),
+      ...(input.resourceCategoryId !== undefined && { resourceCategoryId: input.resourceCategoryId }),
+    },
+    select: {
+      id: true,
+      companyId: true,
+      branchId: true,
+      resourceCategoryId: true,
+      name: true,
+      description: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 }
 
 export async function updateResourceStatus(
@@ -508,6 +602,83 @@ export async function updateRatePlanStatus(
       status: true,
       createdAt: true,
       updatedAt: true,
+    },
+  });
+}
+
+type UpdateRatePlanInput = {
+  name?: string;
+  pricingType?: PricingType;
+  basePrice?: number;
+  timeUnitMinutes?: number;
+  resourceId?: string | null;
+  categoryId?: string | null;
+};
+
+export async function updateRatePlan(
+  companyId: string,
+  branchId: string,
+  ratePlanId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: UpdateRatePlanInput,
+) {
+  await ensureCompanyAccess(companyId, userId, globalRole);
+  await ensureBranchInCompany(companyId, branchId);
+
+  const ratePlan = await prisma.ratePlan.findFirst({
+    where: { id: ratePlanId, companyId, branchId },
+    select: { id: true, resourceId: true, resourceCategoryId: true },
+  });
+
+  if (!ratePlan) {
+    throw new AppError(404, 'Rate plan not found');
+  }
+
+  if (input.resourceId) {
+    const resource = await prisma.resource.findFirst({
+      where: { id: input.resourceId, branchId, status: RecordStatus.ACTIVE },
+      select: { id: true },
+    });
+    if (!resource) {
+      throw new AppError(400, 'Resource not found or inactive');
+    }
+  }
+
+  if (input.categoryId) {
+    const category = await prisma.resourceCategory.findFirst({
+      where: { id: input.categoryId, companyId, status: RecordStatus.ACTIVE },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new AppError(400, 'Category not found or inactive');
+    }
+  }
+
+  return prisma.ratePlan.update({
+    where: { id: ratePlanId },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.pricingType !== undefined && { pricingType: input.pricingType }),
+      ...(input.basePrice !== undefined && { basePrice: input.basePrice }),
+      ...(input.timeUnitMinutes !== undefined && { timeUnitMinutes: input.timeUnitMinutes }),
+      ...(input.resourceId !== undefined && { resourceId: input.resourceId }),
+      ...(input.categoryId !== undefined && { resourceCategoryId: input.categoryId }),
+    },
+    select: {
+      id: true,
+      branchId: true,
+      resourceId: true,
+      resourceCategoryId: true,
+      name: true,
+      pricingType: true,
+      basePrice: true,
+      timeUnitMinutes: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      resource: { select: { id: true, name: true } },
+      resourceCategory: { select: { id: true, name: true } },
     },
   });
 }

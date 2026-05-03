@@ -2,7 +2,7 @@ import { GlobalRole, MembershipRole, RecordStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middlewares/error.middleware';
 import { hashPassword } from '../../utils/password';
-import { ensureBranchInCompany, ensureCompanyAccess } from './companies.access';
+import { ensureBranchInCompany, ensureCompanyAccess, ensureCompanyMemberAccess } from './companies.access';
 
 type CreateCompanyInput = {
   company: {
@@ -200,7 +200,6 @@ export async function getCompanyById(companyId: string, userId: string, globalRo
       where: {
         companyId,
         userId,
-        role: MembershipRole.ADMIN_EMPRESA,
         status: RecordStatus.ACTIVE,
       },
       select: { id: true },
@@ -231,10 +230,12 @@ export async function getCompanyById(companyId: string, userId: string, globalRo
         },
       },
       users: {
-        where: { status: RecordStatus.ACTIVE },
         select: {
+          id: true,
           role: true,
           status: true,
+          createdAt: true,
+          updatedAt: true,
           user: {
             select: {
               id: true,
@@ -397,7 +398,6 @@ export async function listCompanyMembers(companyId: string, actorUserId: string,
   return prisma.companyUser.findMany({
     where: {
       companyId,
-      status: RecordStatus.ACTIVE,
     },
     orderBy: { createdAt: 'asc' },
     select: {
@@ -432,7 +432,6 @@ export async function listBranchMembers(
   return prisma.branchUser.findMany({
     where: {
       branchId,
-      status: RecordStatus.ACTIVE,
     },
     orderBy: { createdAt: 'asc' },
     select: {
@@ -456,7 +455,7 @@ export async function listBranchMembers(
 }
 
 export async function listBranches(companyId: string, userId: string, globalRole: GlobalRole) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
+  await ensureCompanyMemberAccess(companyId, userId, globalRole);
 
   return prisma.branch.findMany({
     where: { companyId },
@@ -465,6 +464,215 @@ export async function listBranches(companyId: string, userId: string, globalRole
       id: true,
       companyId: true,
       name: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+type UpdateCompanyInput = {
+  name?: string;
+  slug?: string;
+  status?: RecordStatus;
+};
+
+export async function updateCompany(
+  companyId: string,
+  actorUserId: string,
+  actorGlobalRole: GlobalRole,
+  input: UpdateCompanyInput,
+) {
+  if (actorGlobalRole !== GlobalRole.SUPERADMIN) {
+    throw new AppError(403, 'Only SUPERADMIN can update company');
+  }
+
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, slug: true },
+  });
+
+  if (!company) {
+    throw new AppError(404, 'Company not found');
+  }
+
+  if (input.slug && input.slug !== company.slug) {
+    const existing = await prisma.company.findFirst({
+      where: { slug: input.slug, id: { not: companyId } },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError(409, 'Company slug already exists');
+    }
+  }
+
+  return prisma.company.update({
+    where: { id: companyId },
+    data: input,
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+type UpdateBranchInput = {
+  name?: string;
+  status?: RecordStatus;
+};
+
+export async function updateBranch(
+  companyId: string,
+  branchId: string,
+  actorUserId: string,
+  actorGlobalRole: GlobalRole,
+  input: UpdateBranchInput,
+) {
+  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
+  await ensureBranchInCompany(companyId, branchId);
+
+  if (input.name) {
+    const existing = await prisma.branch.findFirst({
+      where: { companyId, name: input.name, id: { not: branchId } },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new AppError(409, 'Branch name already exists in this company');
+    }
+  }
+
+  return prisma.branch.update({
+    where: { id: branchId },
+    data: input,
+    select: {
+      id: true,
+      companyId: true,
+      name: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+type UpdateCompanyMemberInput = {
+  role?: MembershipRole;
+  status?: RecordStatus;
+};
+
+export async function updateCompanyMember(
+  companyId: string,
+  membershipId: string,
+  actorUserId: string,
+  actorGlobalRole: GlobalRole,
+  input: UpdateCompanyMemberInput,
+) {
+  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
+
+  const membership = await prisma.companyUser.findFirst({
+    where: { id: membershipId, companyId },
+    select: { id: true, userId: true },
+  });
+
+  if (!membership) {
+    throw new AppError(404, 'Membership not found');
+  }
+
+  return prisma.companyUser.update({
+    where: { id: membershipId },
+    data: input,
+    select: {
+      id: true,
+      companyId: true,
+      userId: true,
+      role: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+type UpdateBranchMemberInput = {
+  role?: MembershipRole;
+  status?: RecordStatus;
+  branchId?: string;
+};
+
+export async function updateBranchMember(
+  companyId: string,
+  branchId: string,
+  membershipId: string,
+  actorUserId: string,
+  actorGlobalRole: GlobalRole,
+  input: UpdateBranchMemberInput,
+) {
+  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
+  await ensureBranchInCompany(companyId, branchId);
+
+  const membership = await prisma.branchUser.findFirst({
+    where: { id: membershipId, branchId },
+    select: { id: true, userId: true },
+  });
+
+  if (!membership) {
+    throw new AppError(404, 'Membership not found');
+  }
+
+  if (input.branchId && input.branchId !== branchId) {
+    await ensureBranchInCompany(companyId, input.branchId);
+
+    const existingInTarget = await prisma.branchUser.findFirst({
+      where: { userId: membership.userId, branchId: input.branchId, status: RecordStatus.ACTIVE },
+      select: { id: true },
+    });
+    if (existingInTarget) {
+      throw new AppError(409, 'User already has a membership in target branch');
+    }
+  }
+
+  if (input.branchId && input.branchId !== branchId) {
+    return prisma.$transaction(async (tx) => {
+      await tx.branchUser.update({
+        where: { id: membershipId },
+        data: { status: RecordStatus.INACTIVE },
+      });
+
+      return tx.branchUser.create({
+        data: {
+          userId: membership.userId,
+          branchId: input.branchId!,
+          role: input.role || MembershipRole.RECEPCION,
+          status: RecordStatus.ACTIVE,
+        },
+        select: {
+          id: true,
+          branchId: true,
+          userId: true,
+          role: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+    });
+  }
+
+  return prisma.branchUser.update({
+    where: { id: membershipId },
+    data: {
+      ...(input.role !== undefined && { role: input.role }),
+      ...(input.status !== undefined && { status: input.status }),
+    },
+    select: {
+      id: true,
+      branchId: true,
+      userId: true,
+      role: true,
       status: true,
       createdAt: true,
       updatedAt: true,

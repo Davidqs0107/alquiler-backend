@@ -64,5 +64,54 @@ export async function getMe(userId: string) {
     throw new AppError(404, 'User not found');
   }
 
-  return user;
+  const memberships = await prisma.companyUser.findMany({
+    where: {
+      userId,
+      status: RecordStatus.ACTIVE,
+    },
+    select: {
+      role: true,
+      company: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      user: {
+        include: {
+          branchMemberships: {
+            where: { status: RecordStatus.ACTIVE },
+            select: {
+              role: true,
+              branch: {
+                select: {
+                  id: true,
+                  name: true,
+                  companyId: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const formattedMemberships = memberships.map((membership) => ({
+    companyId: membership.company.id,
+    companyName: membership.company.name,
+    companyRole: membership.role,
+    branches: membership.user.branchMemberships
+      .filter((bm) => bm.branch.companyId === membership.company.id)
+      .map((bm) => ({
+        companyId: membership.company.id,
+        branchId: bm.branch.id,
+        branchName: bm.branch.name,
+      })),
+  }));
+
+  return {
+    ...user,
+    memberships: formattedMemberships,
+  };
 }

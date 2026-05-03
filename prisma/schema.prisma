@@ -152,6 +152,7 @@ model ResourceCategory {
   id                  String                     @id @default(cuid())
   companyId           String
   name                String
+  description         String?
   status              RecordStatus               @default(ACTIVE)
   createdAt           DateTime                   @default(now())
   updatedAt           DateTime                   @updatedAt
@@ -187,6 +188,7 @@ model Resource {
   branchId           String
   resourceCategoryId String
   name               String
+  description        String?
   status             RecordStatus     @default(ACTIVE)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
