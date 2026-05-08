@@ -1,7 +1,7 @@
 import { GlobalRole, PricingType, RecordStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middlewares/error.middleware';
-import { ensureBranchInCompany, ensureCompanyAccess, ensureCompanyMemberAccess } from '../companies/companies.access';
+import { ensureBranchAccess, ensureBranchInCompany, ensureCompanyAccess, ensureCompanyMemberAccess, ensureResourceManagementAccess, ensureCompanyAdminAccess } from '../companies/companies.access';
 
 type CreateCategoryInput = {
   name: string;
@@ -84,7 +84,7 @@ async function ensureCategoryVisibleInBranch(companyId: string, branchId: string
 }
 
 export async function createCategory(companyId: string, userId: string, globalRole: GlobalRole, input: CreateCategoryInput) {
-  await ensureCompanyMemberAccess(companyId, userId, globalRole);
+  await ensureCompanyAdminAccess(companyId, userId, globalRole);
 
   const existingCategory = await prisma.resourceCategory.findFirst({
     where: {
@@ -142,7 +142,7 @@ export async function listCategories(
         status: true,
         createdAt: true,
         updatedAt: true,
-        visibilityOverrides: {
+        BranchCategoryVisibility: {
           select: {
             branchId: true,
             isVisible: true,
@@ -177,8 +177,7 @@ export async function updateCategoryVisibility(
   globalRole: GlobalRole,
   isVisible: boolean,
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureResourceManagementAccess(companyId, branchId, userId, globalRole);
   await ensureCategoryInCompany(companyId, categoryId);
 
   return prisma.branchCategoryVisibility.upsert({
@@ -259,8 +258,7 @@ export async function createResource(
   globalRole: GlobalRole,
   input: CreateResourceInput,
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureResourceManagementAccess(companyId, branchId, userId, globalRole);
   await ensureCategoryInCompany(companyId, input.resourceCategoryId);
   await ensureCategoryVisibleInBranch(companyId, branchId, input.resourceCategoryId);
 
@@ -310,9 +308,9 @@ export async function listResources(
   const where = {
     companyId,
     branchId,
-    category: {
+    ResourceCategory: {
       status: RecordStatus.ACTIVE,
-      visibilityOverrides: {
+      BranchCategoryVisibility: {
         none: {
           branchId,
           isVisible: false,
@@ -335,7 +333,7 @@ export async function listResources(
         status: true,
         createdAt: true,
         updatedAt: true,
-        category: {
+        ResourceCategory: {
           select: {
             id: true,
             name: true,
@@ -363,8 +361,7 @@ export async function createRatePlan(
   globalRole: GlobalRole,
   input: CreateRatePlanInput,
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureResourceManagementAccess(companyId, branchId, userId, globalRole);
 
   if (input.pricingType === PricingType.TIME_UNIT && !input.timeUnitMinutes) {
     throw new AppError(409, 'timeUnitMinutes is required for TIME_UNIT pricing');
@@ -420,8 +417,7 @@ export async function listRatePlans(
   globalRole: GlobalRole,
   query: ListQueryOptions = {},
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureBranchAccess(companyId, branchId, userId, globalRole);
 
   const where = {
     companyId,
@@ -445,13 +441,13 @@ export async function listRatePlans(
         status: true,
         createdAt: true,
         updatedAt: true,
-        resourceCategory: {
+        ResourceCategory: {
           select: {
             id: true,
             name: true,
           },
         },
-        resource: {
+        Resource: {
           select: {
             id: true,
             name: true,
@@ -486,8 +482,7 @@ export async function updateResource(
   globalRole: GlobalRole,
   input: UpdateResourceInput,
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureResourceManagementAccess(companyId, branchId, userId, globalRole);
   const resource = await ensureResourceInBranch(companyId, branchId, resourceId);
 
   if (input.resourceCategoryId && input.resourceCategoryId !== resource.resourceCategoryId) {
@@ -533,8 +528,7 @@ export async function updateResourceStatus(
   globalRole: GlobalRole,
   status: RecordStatus,
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureResourceManagementAccess(companyId, branchId, userId, globalRole);
 
   const resource = await prisma.resource.findFirst({
     where: {
@@ -573,8 +567,7 @@ export async function updateRatePlanStatus(
   globalRole: GlobalRole,
   status: RecordStatus,
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureResourceManagementAccess(companyId, branchId, userId, globalRole);
 
   const ratePlan = await prisma.ratePlan.findFirst({
     where: {
@@ -623,8 +616,7 @@ export async function updateRatePlan(
   globalRole: GlobalRole,
   input: UpdateRatePlanInput,
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureBranchAccess(companyId, branchId, userId, globalRole);
 
   const ratePlan = await prisma.ratePlan.findFirst({
     where: { id: ratePlanId, companyId, branchId },
@@ -677,8 +669,8 @@ export async function updateRatePlan(
       status: true,
       createdAt: true,
       updatedAt: true,
-      resource: { select: { id: true, name: true } },
-      resourceCategory: { select: { id: true, name: true } },
+      Resource: { select: { id: true, name: true } },
+      ResourceCategory: { select: { id: true, name: true } },
     },
   });
 }

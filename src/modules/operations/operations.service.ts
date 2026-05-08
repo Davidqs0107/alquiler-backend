@@ -48,6 +48,7 @@ type RentalInput = {
   reservedMinutes: number;
   startAt?: Date;
   notes?: string;
+  customerId?: string;
 };
 
 type FinishRentalInput = {
@@ -130,7 +131,7 @@ async function ensureOperationalCompanyAccess(companyId: string, userId: string,
       where: {
         companyId,
         userId,
-        role: { in: [MembershipRole.ADMIN_EMPRESA, MembershipRole.CAJERO, MembershipRole.RECEPCION] },
+        role: { in: [MembershipRole.ADMIN_EMPRESA, MembershipRole.ADMIN_SEDE, MembershipRole.CAJERO, MembershipRole.RECEPCION] },
         status: RecordStatus.ACTIVE,
       },
       select: { id: true },
@@ -138,9 +139,8 @@ async function ensureOperationalCompanyAccess(companyId: string, userId: string,
     prisma.branchUser.findFirst({
       where: {
         userId,
-        role: { in: [MembershipRole.ADMIN_SEDE, MembershipRole.CAJERO, MembershipRole.RECEPCION] },
         status: RecordStatus.ACTIVE,
-        branch: {
+        Branch: {
           companyId,
           status: RecordStatus.ACTIVE,
         },
@@ -170,31 +170,37 @@ async function ensureCatalogAdminAccess(companyId: string, userId: string, globa
     return company;
   }
 
-  const [companyMembership, branchMembership] = await Promise.all([
-    prisma.companyUser.findFirst({
-      where: {
-        companyId,
-        userId,
-        role: MembershipRole.ADMIN_EMPRESA,
-        status: RecordStatus.ACTIVE,
-      },
-      select: { id: true },
-    }),
-    prisma.branchUser.findFirst({
-      where: {
-        userId,
-        role: MembershipRole.ADMIN_SEDE,
-        status: RecordStatus.ACTIVE,
-        branch: {
-          companyId,
-          status: RecordStatus.ACTIVE,
-        },
-      },
-      select: { id: true },
-    }),
-  ]);
+  const membership = await prisma.companyUser.findFirst({
+    where: {
+      companyId,
+      userId,
+      role: { in: [MembershipRole.ADMIN_EMPRESA, MembershipRole.ADMIN_SEDE] },
+      status: RecordStatus.ACTIVE,
+    },
+    select: { id: true, role: true },
+  });
 
-  if (!companyMembership && !branchMembership) {
+  if (!membership) {
+    throw new AppError(403, 'Insufficient permissions');
+  }
+
+  if (membership.role === MembershipRole.ADMIN_EMPRESA) {
+    return company;
+  }
+
+  const branchUser = await prisma.branchUser.findFirst({
+    where: {
+      userId,
+      status: RecordStatus.ACTIVE,
+      Branch: {
+        companyId,
+        status: RecordStatus.ACTIVE,
+      },
+    },
+    select: { id: true },
+  });
+
+  if (!branchUser) {
     throw new AppError(403, 'Insufficient permissions');
   }
 
@@ -209,6 +215,114 @@ async function ensureSensitiveTicketActionAccess(companyId: string, branchId: st
 async function ensureOperationsAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
   await ensureOperationalCompanyAccess(companyId, userId, globalRole);
   return ensureBranchInCompany(companyId, branchId);
+}
+
+async function ensureCajeroAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
+  await ensureCajeroCompanyAccess(companyId, userId, globalRole);
+  return ensureBranchInCompany(companyId, branchId);
+}
+
+async function ensureRecepcionAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
+  await ensureRecepcionCompanyAccess(companyId, userId, globalRole);
+  return ensureBranchInCompany(companyId, branchId);
+}
+
+async function ensureCajeroCompanyAccess(companyId: string, userId: string, globalRole: GlobalRole) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, status: true },
+  });
+
+  if (!company || company.status !== RecordStatus.ACTIVE) {
+    throw new AppError(404, 'Company not found');
+  }
+
+  if (globalRole === GlobalRole.SUPERADMIN) {
+    return company;
+  }
+
+  const membership = await prisma.companyUser.findFirst({
+    where: {
+      companyId,
+      userId,
+      role: { in: [MembershipRole.ADMIN_EMPRESA, MembershipRole.ADMIN_SEDE, MembershipRole.CAJERO] },
+      status: RecordStatus.ACTIVE,
+    },
+    select: { id: true, role: true },
+  });
+
+  if (!membership) {
+    throw new AppError(403, 'Insufficient permissions');
+  }
+
+  if (membership.role === MembershipRole.CAJERO) {
+    const branchUser = await prisma.branchUser.findFirst({
+      where: {
+        userId,
+        status: RecordStatus.ACTIVE,
+        Branch: {
+          companyId,
+          status: RecordStatus.ACTIVE,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!branchUser) {
+      throw new AppError(403, 'Insufficient permissions');
+    }
+  }
+
+  return company;
+}
+
+async function ensureRecepcionCompanyAccess(companyId: string, userId: string, globalRole: GlobalRole) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, status: true },
+  });
+
+  if (!company || company.status !== RecordStatus.ACTIVE) {
+    throw new AppError(404, 'Company not found');
+  }
+
+  if (globalRole === GlobalRole.SUPERADMIN) {
+    return company;
+  }
+
+  const membership = await prisma.companyUser.findFirst({
+    where: {
+      companyId,
+      userId,
+      role: { in: [MembershipRole.ADMIN_EMPRESA, MembershipRole.ADMIN_SEDE, MembershipRole.RECEPCION] },
+      status: RecordStatus.ACTIVE,
+    },
+    select: { id: true, role: true },
+  });
+
+  if (!membership) {
+    throw new AppError(403, 'Insufficient permissions');
+  }
+
+  if (membership.role === MembershipRole.RECEPCION) {
+    const branchUser = await prisma.branchUser.findFirst({
+      where: {
+        userId,
+        status: RecordStatus.ACTIVE,
+        Branch: {
+          companyId,
+          status: RecordStatus.ACTIVE,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!branchUser) {
+      throw new AppError(403, 'Insufficient permissions');
+    }
+  }
+
+  return company;
 }
 
 async function ensureTicketInBranch(tx: PrismaTx, companyId: string, branchId: string, ticketId: string) {
@@ -249,7 +363,7 @@ async function ensureResourceOperable(tx: PrismaTx, companyId: string, branchId:
       companyId,
       branchId,
       status: RecordStatus.ACTIVE,
-      category: {
+      ResourceCategory: {
         status: RecordStatus.ACTIVE,
       },
     },
@@ -259,11 +373,11 @@ async function ensureResourceOperable(tx: PrismaTx, companyId: string, branchId:
       branchId: true,
       resourceCategoryId: true,
       name: true,
-      category: {
+      ResourceCategory: {
         select: {
           id: true,
           name: true,
-          visibilityOverrides: {
+          BranchCategoryVisibility: {
             where: {
               branchId,
               isVisible: false,
@@ -279,14 +393,14 @@ async function ensureResourceOperable(tx: PrismaTx, companyId: string, branchId:
     throw new AppError(404, 'Resource not found');
   }
 
-  if (resource.category.visibilityOverrides.length > 0) {
+  if (resource.ResourceCategory.BranchCategoryVisibility.length > 0) {
     throw new AppError(409, 'Category is hidden in this branch');
   }
 
   return resource;
 }
 
-async function ensureResourceAvailable(tx: PrismaTx, resourceId: string, startAt: Date, scheduledEndAt: Date) {
+async function ensureResourceAvailable(tx: PrismaTx, resourceId: string, startAt: Date, scheduledEndAt: Date, excludeTicketId?: string) {
   const overlapping = await tx.rentalSession.findFirst({
     where: {
       resourceId,
@@ -295,12 +409,30 @@ async function ensureResourceAvailable(tx: PrismaTx, resourceId: string, startAt
       },
       startAt: { lt: scheduledEndAt },
       scheduledEndAt: { gt: startAt },
+      ...(excludeTicketId ? {
+        TicketItem: {
+          ticketId: { not: excludeTicketId },
+        },
+      } : {}),
     },
     select: { id: true },
   });
 
   if (overlapping) {
     throw new AppError(409, 'Resource is occupied or has an overlapping rental');
+  }
+
+  const blockout = await tx.resourceBlockout.findFirst({
+    where: {
+      resourceId,
+      startAt: { lt: scheduledEndAt },
+      endAt: { gt: startAt },
+    },
+    select: { id: true, reason: true, startAt: true, endAt: true },
+  });
+
+  if (blockout) {
+    throw new AppError(409, `Resource is blocked: ${blockout.reason} (${blockout.startAt.toLocaleString()} - ${blockout.endAt.toLocaleString()})`);
   }
 }
 
@@ -506,7 +638,7 @@ async function ensurePaymentInTicket(tx: PrismaTx, ticketId: string, paymentId: 
       notes: true,
       createdAt: true,
       updatedAt: true,
-      paymentReversals: {
+      PaymentReversal: {
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
@@ -529,10 +661,10 @@ async function ensurePaymentInTicket(tx: PrismaTx, ticketId: string, paymentId: 
 
 function buildPaymentReversalSummary(payment: {
   amount: Prisma.Decimal | number;
-  paymentReversals: Array<{ amount: Prisma.Decimal | number }>;
+  PaymentReversal: Array<{ amount: Prisma.Decimal | number }>;
 }) {
   const originalAmount = decimalToNumber(payment.amount);
-  const reversedAmount = payment.paymentReversals.reduce((sum, reversal) => sum + decimalToNumber(reversal.amount), 0);
+  const reversedAmount = payment.PaymentReversal.reduce((sum, reversal) => sum + decimalToNumber(reversal.amount), 0);
 
   return {
     originalAmount,
@@ -568,7 +700,7 @@ async function createRentalArtifacts(tx: PrismaTx, companyId: string, branchId: 
   const startAt = input.startAt ?? new Date();
   const scheduledEndAt = new Date(startAt.getTime() + input.reservedMinutes * 60 * 1000);
 
-  await ensureResourceAvailable(tx, resource.id, startAt, scheduledEndAt);
+  await ensureResourceAvailable(tx, resource.id, startAt, scheduledEndAt, ticketId);
 
   const baseAmount = calculateBaseAmount(ratePlan, input.reservedMinutes);
   const description = input.notes ? `${resource.name} — ${input.notes}` : resource.name;
@@ -602,6 +734,7 @@ async function createRentalArtifacts(tx: PrismaTx, companyId: string, branchId: 
       branchId,
       resourceId: resource.id,
       ticketItemId: ticketItem.id,
+      customerId: input.customerId,
       status: RentalSessionStatus.RESERVED,
       startAt,
       scheduledEndAt,
@@ -640,6 +773,7 @@ const rentalSessionSelect = {
   baseAmount: true,
   overtimeAmount: true,
   totalAmount: true,
+  extensions: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -705,7 +839,7 @@ async function ensureTicketItemInTicket(tx: PrismaTx, ticketId: string, ticketIt
       ticketId,
     },
     include: {
-      rentalSession: {
+      RentalSession: {
         select: {
           id: true,
           status: true,
@@ -729,7 +863,7 @@ async function allocateReversalAmountsFIFO(tx: PrismaTx, ticketId: string, amoun
     select: {
       id: true,
       amount: true,
-      paymentReversals: {
+      PaymentReversal: {
         orderBy: { createdAt: 'asc' },
         select: {
           amount: true,
@@ -1020,10 +1154,10 @@ export async function listTickets(
       orderBy: [{ openedAt: 'desc' }, { ticketNumber: 'desc' }],
       select: {
         ...ticketSummarySelect,
-        payments: {
+        Payment: {
           select: {
             amount: true,
-            paymentReversals: {
+            PaymentReversal: {
               select: {
                 amount: true,
               },
@@ -1045,10 +1179,10 @@ export async function listTickets(
 
   return {
     data: tickets.map((ticket) => {
-      const paidGrossTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
-      const reversedTotal = ticket.payments.reduce(
+      const paidGrossTotal = ticket.Payment.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
+      const reversedTotal = ticket.Payment.reduce(
         (sum, payment) =>
-          sum + payment.paymentReversals.reduce((innerSum, reversal) => innerSum + decimalToNumber(reversal.amount), 0),
+          sum + payment.PaymentReversal.reduce((innerSum, reversal) => innerSum + decimalToNumber(reversal.amount), 0),
         0,
       );
       const paidNetTotal = Math.max(paidGrossTotal - reversedTotal, 0);
@@ -1081,16 +1215,16 @@ export async function getTicketDetail(
     where: { id: ticketId, companyId, branchId },
     select: {
       ...ticketSummarySelect,
-      items: {
+      TicketItem: {
         orderBy: { createdAt: 'asc' },
         select: {
           ...ticketItemSelect,
-          rentalSession: {
+          RentalSession: {
             select: rentalSessionSelect,
           },
         },
       },
-      payments: {
+      Payment: {
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
@@ -1099,7 +1233,7 @@ export async function getTicketDetail(
           notes: true,
           createdAt: true,
           updatedAt: true,
-          paymentReversals: {
+          PaymentReversal: {
             orderBy: { createdAt: 'asc' },
             select: {
               id: true,
@@ -1112,7 +1246,7 @@ export async function getTicketDetail(
           },
         },
       },
-      paymentReversals: {
+      PaymentReversal: {
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
@@ -1131,8 +1265,8 @@ export async function getTicketDetail(
     throw new AppError(404, 'Ticket not found');
   }
 
-  const paidGrossTotal = ticket.payments.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
-  const reversedTotal = ticket.paymentReversals.reduce((sum, reversal) => sum + decimalToNumber(reversal.amount), 0);
+  const paidGrossTotal = ticket.Payment.reduce((sum, payment) => sum + decimalToNumber(payment.amount), 0);
+  const reversedTotal = ticket.PaymentReversal.reduce((sum, reversal) => sum + decimalToNumber(reversal.amount), 0);
   const paidNetTotal = Math.max(paidGrossTotal - reversedTotal, 0);
   const total = decimalToNumber(ticket.total);
 
@@ -1434,7 +1568,7 @@ export async function cancelTicketItem(
       throw new AppError(409, 'Ticket item is already cancelled');
     }
 
-    if (ticketItem.type === TicketItemType.RENTAL && ticketItem.rentalSession) {
+    if (ticketItem.type === TicketItemType.RENTAL && ticketItem.RentalSession) {
       throw new AppError(409, 'Rental ticket item cannot be cancelled in this phase');
     }
 
@@ -1519,7 +1653,7 @@ export async function cancelRentalSession(
     const rentalSession = await tx.rentalSession.findFirst({
       where: { id: rentalSessionId, companyId, branchId },
       include: {
-        ticketItem: {
+        TicketItem: {
           select: {
             id: true,
             ticketId: true,
@@ -1535,10 +1669,10 @@ export async function cancelRentalSession(
       throw new AppError(404, 'Rental session not found');
     }
 
-    const ticket = await ensureTicketInBranch(tx, companyId, branchId, rentalSession.ticketItem.ticketId);
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, rentalSession.TicketItem.ticketId);
     ensureTicketOpen(ticket);
 
-    if (rentalSession.status === RentalSessionStatus.CANCELLED || rentalSession.ticketItem.cancelledAt) {
+    if (rentalSession.status === RentalSessionStatus.CANCELLED || rentalSession.TicketItem.cancelledAt) {
       throw new AppError(409, 'Rental session is already cancelled');
     }
 
@@ -1546,17 +1680,17 @@ export async function cancelRentalSession(
       throw new AppError(409, 'Rental session in use cannot be cancelled in this phase');
     }
 
-    const lineCancelableNetAmount = decimalToNumber(rentalSession.ticketItem.subtotal);
-    const financialsBefore = await getTicketFinancialSummary(tx, rentalSession.ticketItem.ticketId);
+    const lineCancelableNetAmount = decimalToNumber(rentalSession.TicketItem.subtotal);
+    const financialsBefore = await getTicketFinancialSummary(tx, rentalSession.TicketItem.ticketId);
     const reversalNeeded = Math.min(lineCancelableNetAmount, financialsBefore.paidNetTotal);
-    const paymentReversals = reversalNeeded > 0 ? await allocateReversalAmountsFIFO(tx, rentalSession.ticketItem.ticketId, reversalNeeded) : [];
+    const PaymentReversal = reversalNeeded > 0 ? await allocateReversalAmountsFIFO(tx, rentalSession.TicketItem.ticketId, reversalNeeded) : [];
 
     const createdReversals = await Promise.all(
-      paymentReversals.map((allocation) =>
+      PaymentReversal.map((allocation) =>
         tx.paymentReversal.create({
           data: {
             companyId,
-            ticketId: rentalSession.ticketItem.ticketId,
+            ticketId: rentalSession.TicketItem.ticketId,
             paymentId: allocation.paymentId,
             amount: toDecimal(allocation.amount),
             reason: input.reason,
@@ -1588,7 +1722,7 @@ export async function cancelRentalSession(
     });
 
     const ticketItem = await tx.ticketItem.update({
-      where: { id: rentalSession.ticketItem.id },
+      where: { id: rentalSession.TicketItem.id },
       data: {
         cancelledAt: now,
         cancellationReason: input.reason,
@@ -1596,14 +1730,14 @@ export async function cancelRentalSession(
       select: ticketItemSelect,
     });
 
-    const updatedTicket = await recalculateTicketTotals(tx, rentalSession.ticketItem.ticketId);
-    const totals = await buildTicketSummary(tx, rentalSession.ticketItem.ticketId);
+    const updatedTicket = await recalculateTicketTotals(tx, rentalSession.TicketItem.ticketId);
+    const totals = await buildTicketSummary(tx, rentalSession.TicketItem.ticketId);
 
     return {
       rentalSession: updatedSession,
       ticketItem,
       ticket: updatedTicket,
-      paymentReversals: createdReversals,
+      PaymentReversal: createdReversals,
       totals: {
         paidGrossTotal: totals.paidGrossTotal,
         reversedTotal: totals.reversedTotal,
@@ -1611,6 +1745,54 @@ export async function cancelRentalSession(
         paidTotal: totals.paidTotal,
         pendingAmount: totals.pendingAmount,
       },
+    };
+  });
+}
+
+export async function startRentalSession(
+  companyId: string,
+  branchId: string,
+  rentalSessionId: string,
+  userId: string,
+  globalRole: GlobalRole,
+) {
+  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const rentalSession = await tx.rentalSession.findFirst({
+      where: { id: rentalSessionId, companyId, branchId },
+      include: {
+        TicketItem: {
+          select: {
+            id: true,
+            ticketId: true,
+          },
+        },
+      },
+    });
+
+    if (!rentalSession) {
+      throw new AppError(404, 'Rental session not found');
+    }
+
+    if (rentalSession.status !== RentalSessionStatus.RESERVED) {
+      throw new AppError(409, 'Only RESERVED rental sessions can be started');
+    }
+
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, rentalSession.TicketItem.ticketId);
+    ensureTicketOpen(ticket);
+
+    const updatedRentalSession = await tx.rentalSession.update({
+      where: { id: rentalSessionId },
+      data: {
+        status: RentalSessionStatus.IN_USE,
+        startAt: new Date(),
+      },
+      select: rentalSessionSelect,
+    });
+
+    return {
+      rentalSession: updatedRentalSession,
     };
   });
 }
@@ -1629,7 +1811,7 @@ export async function finishRental(
     const rentalSession = await tx.rentalSession.findFirst({
       where: { id: rentalSessionId, companyId, branchId },
       include: {
-        ticketItem: {
+        TicketItem: {
           select: {
             id: true,
             ticketId: true,
@@ -1643,7 +1825,7 @@ export async function finishRental(
       throw new AppError(404, 'Rental session not found');
     }
 
-    const ticket = await ensureTicketInBranch(tx, companyId, branchId, rentalSession.ticketItem.ticketId);
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, rentalSession.TicketItem.ticketId);
     ensureTicketOpen(ticket);
 
     if (rentalSession.status === RentalSessionStatus.FINISHED || rentalSession.endedAt) {
@@ -1676,7 +1858,7 @@ export async function finishRental(
     const baseAmount = calculateBaseAmount(ratePlanLike, rentalSession.reservedMinutes);
     const overtimeAmount = calculateOvertimeAmount(ratePlanLike, rentalSession.reservedMinutes, overtimeMinutes);
     const totalAmount = baseAmount + overtimeAmount;
-    const lineDiscountAmount = decimalToNumber(rentalSession.ticketItem.discountAmount);
+    const lineDiscountAmount = decimalToNumber(rentalSession.TicketItem.discountAmount);
 
     if (lineDiscountAmount > totalAmount) {
       throw new AppError(409, 'Discount exceeds allowed amount');
@@ -1697,7 +1879,7 @@ export async function finishRental(
     });
 
     const ticketItem = await tx.ticketItem.update({
-      where: { id: rentalSession.ticketItem.id },
+      where: { id: rentalSession.TicketItem.id },
       data: {
         unitPrice: toDecimal(totalAmount),
         subtotal: toDecimal(totalAmount - lineDiscountAmount),
@@ -1705,8 +1887,8 @@ export async function finishRental(
       select: ticketItemSelect,
     });
 
-    const updatedTicket = await recalculateTicketTotals(tx, rentalSession.ticketItem.ticketId);
-    const totals = await buildTicketSummary(tx, rentalSession.ticketItem.ticketId);
+    const updatedTicket = await recalculateTicketTotals(tx, rentalSession.TicketItem.ticketId);
+    const totals = await buildTicketSummary(tx, rentalSession.TicketItem.ticketId);
 
     return {
       rentalSession: updatedSession,
@@ -1728,7 +1910,7 @@ export async function createPayment(
   globalRole: GlobalRole,
   input: CreatePaymentInput,
 ) {
-  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+  await ensureCajeroAccess(companyId, branchId, userId, globalRole);
 
   return prisma.$transaction(async (tx) => {
     const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
@@ -1849,7 +2031,7 @@ export async function closeTicket(
   userId: string,
   globalRole: GlobalRole,
 ) {
-  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+  await ensureCajeroAccess(companyId, branchId, userId, globalRole);
 
   return prisma.$transaction(async (tx) => {
     const ticket = await ensureTicketInBranch(tx, companyId, branchId, ticketId);
@@ -1859,7 +2041,7 @@ export async function closeTicket(
       where: {
         companyId,
         branchId,
-        ticketItem: { ticketId },
+        TicketItem: { ticketId },
         status: RentalSessionStatus.IN_USE,
       },
       select: { id: true },
@@ -1873,7 +2055,7 @@ export async function closeTicket(
       where: {
         companyId,
         branchId,
-        ticketItem: { ticketId },
+        TicketItem: { ticketId },
         status: RentalSessionStatus.RESERVED,
         scheduledEndAt: { lt: new Date() },
       },
@@ -1882,6 +2064,27 @@ export async function closeTicket(
 
     if (overdueSession) {
       throw new AppError(409, 'Ticket has overdue rental sessions. Cancel or finish them first.');
+    }
+
+    const notStartedSessions = await tx.rentalSession.findMany({
+      where: {
+        companyId,
+        branchId,
+        TicketItem: { ticketId },
+        status: RentalSessionStatus.RESERVED,
+      },
+      select: { id: true },
+    });
+
+    if (notStartedSessions.length > 0) {
+      await tx.rentalSession.updateMany({
+        where: {
+          id: { in: notStartedSessions.map((s) => s.id) },
+        },
+        data: {
+          status: RentalSessionStatus.CANCELLED,
+        },
+      });
     }
 
     const financials = await getTicketFinancialSummary(tx, ticketId);
@@ -1928,7 +2131,7 @@ export async function cancelTicketWithReversal(
         notes: true,
         createdAt: true,
         updatedAt: true,
-        paymentReversals: {
+        PaymentReversal: {
           orderBy: { createdAt: 'asc' },
           select: {
             id: true,
@@ -1955,7 +2158,7 @@ export async function cancelTicketWithReversal(
 
     const now = new Date();
 
-    const paymentReversals = await Promise.all(
+    const PaymentReversal = await Promise.all(
       reversiblePayments.map(({ payment, summary }) =>
         tx.paymentReversal.create({
           data: {
@@ -2006,9 +2209,112 @@ export async function cancelTicketWithReversal(
 
     return {
       ticket: cancelledTicket,
-      payments: payments.map(({ paymentReversals, ...payment }) => payment),
-      paymentReversals,
+      payments: payments.map(({ PaymentReversal, ...payment }) => payment),
+      PaymentReversal,
       totals,
+    };
+  });
+}
+
+type ExtendRentalInput = {
+  additionalMinutes: number;
+  isOvertime: boolean;
+};
+
+export async function extendRentalSession(
+  companyId: string,
+  branchId: string,
+  rentalSessionId: string,
+  userId: string,
+  globalRole: GlobalRole,
+  input: ExtendRentalInput,
+) {
+  await ensureOperationsAccess(companyId, branchId, userId, globalRole);
+
+  return prisma.$transaction(async (tx) => {
+    const rentalSession = await tx.rentalSession.findFirst({
+      where: { id: rentalSessionId, companyId, branchId },
+      include: {
+        TicketItem: {
+          select: {
+            id: true,
+            ticketId: true,
+            discountAmount: true,
+          },
+        },
+      },
+    });
+
+    if (!rentalSession) {
+      throw new AppError(404, 'Rental session not found');
+    }
+
+    if (rentalSession.status !== RentalSessionStatus.IN_USE) {
+      throw new AppError(409, 'Only IN_USE rental sessions can be extended');
+    }
+
+    const ticket = await ensureTicketInBranch(tx, companyId, branchId, rentalSession.TicketItem.ticketId);
+    ensureTicketOpen(ticket);
+
+    const ratePlanSnapshot = rentalSession.ratePlanSnapshot as {
+      pricingType: PricingType;
+      basePrice: number;
+      timeUnitMinutes?: number | null;
+    } | null;
+
+    if (!ratePlanSnapshot) {
+      throw new AppError(409, 'Rental session is missing rate plan snapshot');
+    }
+
+    const ratePlanLike = {
+      pricingType: ratePlanSnapshot.pricingType,
+      basePrice: toDecimal(ratePlanSnapshot.basePrice),
+      timeUnitMinutes: ratePlanSnapshot.timeUnitMinutes ?? null,
+    };
+
+    const amount = input.isOvertime
+      ? calculateOvertimeAmount(ratePlanLike, rentalSession.reservedMinutes, input.additionalMinutes)
+      : calculateBaseAmount(ratePlanLike, input.additionalMinutes);
+
+    const extension = {
+      minutes: input.additionalMinutes,
+      isOvertime: input.isOvertime,
+      extendedAt: new Date().toISOString(),
+      amount,
+    };
+
+    const existingExtensions = (rentalSession.extensions as Array<{ minutes: number; isOvertime: boolean; extendedAt: string; amount: number }> | null) ?? [];
+
+    const updatedRentalSession = await tx.rentalSession.update({
+      where: { id: rentalSessionId },
+      data: {
+        scheduledEndAt: new Date(rentalSession.scheduledEndAt.getTime() + input.additionalMinutes * 60 * 1000),
+        extensions: [...existingExtensions, extension],
+        totalAmount: toDecimal(decimalToNumber(rentalSession.totalAmount) + amount),
+      },
+      select: rentalSessionSelect,
+    });
+
+    const ticketItem = await tx.ticketItem.update({
+      where: { id: rentalSession.TicketItem.id },
+      data: {
+        unitPrice: updatedRentalSession.totalAmount,
+        subtotal: toDecimal(decimalToNumber(updatedRentalSession.totalAmount) - decimalToNumber(rentalSession.TicketItem.discountAmount)),
+      },
+      select: ticketItemSelect,
+    });
+
+    const updatedTicket = await recalculateTicketTotals(tx, rentalSession.TicketItem.ticketId);
+    const totals = await buildTicketSummary(tx, rentalSession.TicketItem.ticketId);
+
+    return {
+      rentalSession: updatedRentalSession,
+      ticketItem,
+      ticket: updatedTicket,
+      totals: {
+        paidTotal: totals.paidTotal,
+        pendingAmount: totals.pendingAmount,
+      },
     };
   });
 }

@@ -119,3 +119,137 @@ export async function hasBranchAccess(userId: string, branchId: string, globalRo
 
   return !!branchUser;
 }
+
+export async function ensureBranchAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, status: true },
+  });
+
+  if (!company || company.status !== RecordStatus.ACTIVE) {
+    throw new AppError(404, 'Company not found');
+  }
+
+  if (globalRole === GlobalRole.SUPERADMIN) {
+    return company;
+  }
+
+  const membership = await prisma.companyUser.findFirst({
+    where: {
+      companyId,
+      userId,
+      status: RecordStatus.ACTIVE,
+    },
+    select: { role: true },
+  });
+
+  if (!membership) {
+    throw new AppError(403, 'Insufficient permissions');
+  }
+
+  if (membership.role === MembershipRole.ADMIN_EMPRESA) {
+    return company;
+  }
+
+  const branchUser = await prisma.branchUser.findFirst({
+    where: {
+      userId,
+      branchId,
+      status: RecordStatus.ACTIVE,
+    },
+  });
+
+  if (!branchUser) {
+    throw new AppError(403, 'You do not have access to this branch');
+  }
+
+  return company;
+}
+
+export async function ensureResourceManagementAccess(companyId: string, branchId: string, userId: string, globalRole: GlobalRole) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, status: true },
+  });
+
+  if (!company || company.status !== RecordStatus.ACTIVE) {
+    throw new AppError(404, 'Company not found');
+  }
+
+  if (globalRole === GlobalRole.SUPERADMIN) {
+    return company;
+  }
+
+  const membership = await prisma.companyUser.findFirst({
+    where: {
+      companyId,
+      userId,
+      role: MembershipRole.ADMIN_EMPRESA,
+      status: RecordStatus.ACTIVE,
+    },
+    select: { id: true },
+  });
+
+  if (membership) {
+    return company;
+  }
+
+  const sedeMembership = await prisma.companyUser.findFirst({
+    where: {
+      companyId,
+      userId,
+      role: MembershipRole.ADMIN_SEDE,
+      status: RecordStatus.ACTIVE,
+    },
+    select: { id: true },
+  });
+
+  if (!sedeMembership) {
+    throw new AppError(403, 'Insufficient permissions');
+  }
+
+  const branchUser = await prisma.branchUser.findFirst({
+    where: {
+      userId,
+      branchId,
+      status: RecordStatus.ACTIVE,
+    },
+  });
+
+  if (!branchUser) {
+    throw new AppError(403, 'You do not have access to this branch');
+  }
+
+  return company;
+}
+
+export async function ensureCompanyAdminAccess(companyId: string, userId: string, globalRole: GlobalRole) {
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true, status: true },
+  });
+
+  if (!company || company.status !== RecordStatus.ACTIVE) {
+    throw new AppError(404, 'Company not found');
+  }
+
+  if (globalRole === GlobalRole.SUPERADMIN) {
+    return company;
+  }
+
+  const membership = await prisma.companyUser.findFirst({
+    where: {
+      companyId,
+      userId,
+      role: { in: [MembershipRole.ADMIN_EMPRESA, MembershipRole.ADMIN_SEDE] },
+      status: RecordStatus.ACTIVE,
+    },
+    select: { id: true },
+  });
+
+  if (!membership) {
+    throw new AppError(403, 'Insufficient permissions');
+  }
+
+  return company;
+}

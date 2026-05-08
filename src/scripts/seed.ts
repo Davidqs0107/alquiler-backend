@@ -13,10 +13,12 @@ async function main() {
   await prisma.ratePlanRule.deleteMany({});
   await prisma.ratePlan.deleteMany({});
   await prisma.rentalSession.deleteMany({});
+  await prisma.resourceBlockout.deleteMany({});
   await prisma.resource.deleteMany({});
   await prisma.resourceCategory.deleteMany({});
   await prisma.branchCategoryVisibility.deleteMany({});
   await prisma.saleCatalogItem.deleteMany({});
+  await prisma.customer.deleteMany({});
   await prisma.branchUser.deleteMany({});
   await prisma.companyUser.deleteMany({});
   await prisma.branch.deleteMany({});
@@ -93,7 +95,6 @@ async function main() {
     data: {
       branchId: centralBranch.id,
       userId: adminSedeUser.id,
-      role: MembershipRole.ADMIN_SEDE,
       status: RecordStatus.ACTIVE,
     },
   });
@@ -119,7 +120,6 @@ async function main() {
     data: {
       branchId: centralBranch.id,
       userId: cajeroUser.id,
-      role: MembershipRole.CAJERO,
       status: RecordStatus.ACTIVE,
     },
   });
@@ -145,11 +145,34 @@ async function main() {
     data: {
       branchId: norteBranch.id,
       userId: recepcionUser.id,
-      role: MembershipRole.RECEPCION,
       status: RecordStatus.ACTIVE,
     },
   });
   console.log('RECEPCION: recepcion@deportesplus.com (Norte)');
+
+  const customers = [
+    { name: 'Juan Pérez', email: 'juan.perez@email.com', phone: '+5491112345678' },
+    { name: 'María García', email: 'maria.garcia@email.com', phone: '+5492223456789' },
+    { name: 'Carlos López', email: 'carlos.lopez@email.com', phone: '+5493334567890' },
+    { name: 'Ana Martínez', email: 'ana.martinez@email.com', phone: '+5494445678901' },
+    { name: 'Pedro Sánchez', email: 'pedro.sanchez@email.com', phone: '+5495556789012' },
+    { name: 'Laura Rodríguez', email: 'laura.rodriguez@email.com', phone: '+5496667890123' },
+    { name: 'Diego Fernández', email: 'diego.fernandez@email.com', phone: '+5497778901234' },
+    { name: 'Sofia Hernandez', email: 'sofia.hernandez@email.com', phone: '+5498889012345' },
+  ];
+
+  for (const c of customers) {
+    await prisma.customer.create({
+      data: {
+        companyId: company.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        status: RecordStatus.ACTIVE,
+      },
+    });
+  }
+  console.log('Customers:', customers.length);
 
   const categories = ['Canchas de fútbol', 'Canchas de tennis', 'Gimnasio', 'Salones'];
   for (const name of categories) {
@@ -165,29 +188,53 @@ async function main() {
   }
   console.log('Categories:', categories.length);
 
-  const resources = [
-    { name: 'Cancha 1 - Fútbol 5', categoryName: 'Canchas de fútbol' },
-    { name: 'Cancha 2 - Fútbol 5', categoryName: 'Canchas de fútbol' },
-    { name: 'Cancha A - Tennis', categoryName: 'Canchas de tennis' },
-    { name: 'Sector cardio', categoryName: 'Gimnasio' },
-    { name: 'Salón events', categoryName: 'Salones' },
+  const resourceData = [
+    { name: 'Cancha 1 - Fútbol 5', categoryName: 'Canchas de fútbol', image: null, maxCapacity: 10, location: 'Sector A' },
+    { name: 'Cancha 2 - Fútbol 5', categoryName: 'Canchas de fútbol', image: null, maxCapacity: 10, location: 'Sector A' },
+    { name: 'Cancha A - Tennis', categoryName: 'Canchas de tennis', image: null, maxCapacity: 4, location: 'Sector B' },
+    { name: 'Sector cardio', categoryName: 'Gimnasio', image: null, maxCapacity: 20, location: 'Planta baja' },
+    { name: 'Salón events', categoryName: 'Salones', image: null, maxCapacity: 50, location: 'Piso 2' },
   ];
 
-  for (const res of resources) {
+  const createdResources = [];
+  for (const res of resourceData) {
     const cat = await prisma.resourceCategory.findUnique({
       where: { companyId_name: { companyId: company.id, name: res.categoryName } },
     });
-    await prisma.resource.create({
+    const resource = await prisma.resource.create({
       data: {
         companyId: company.id,
         branchId: centralBranch.id,
         resourceCategoryId: cat!.id,
         name: res.name,
         status: RecordStatus.ACTIVE,
+        image: res.image,
+        maxCapacity: res.maxCapacity,
+        location: res.location,
+      },
+    });
+    createdResources.push(resource);
+  }
+  console.log('Resources:', createdResources.length);
+
+  const now = new Date();
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const blockouts = [
+    { resourceIdx: 0, startAt: new Date(now.getTime() + 2 * 60 * 60 * 1000), endAt: new Date(now.getTime() + 4 * 60 * 60 * 1000), reason: 'Mantenimiento programado' },
+    { resourceIdx: 1, startAt: new Date(tomorrow.getTime() + 10 * 60 * 60 * 1000), endAt: new Date(tomorrow.getTime() + 14 * 60 * 60 * 1000), reason: 'Cerrado por lluvia' },
+  ];
+
+  for (const b of blockouts) {
+    await prisma.resourceBlockout.create({
+      data: {
+        resourceId: createdResources[b.resourceIdx].id,
+        startAt: b.startAt,
+        endAt: b.endAt,
+        reason: b.reason,
       },
     });
   }
-  console.log('Resources:', resources.length);
+  console.log('Blockouts:', blockouts.length);
 
   const ratePlans = [
     { name: 'Fútbol 5 - 1 hora', basePrice: '1500', timeUnit: 60, categoryName: 'Canchas de fútbol' },
@@ -239,6 +286,8 @@ async function main() {
   console.log('ADMIN_SEDE: adminsede@deportesplus.com / admin123 (Central)');
   console.log('CAJERO: cajero@deportesplus.com / admin123 (Central)');
   console.log('RECEPCION: recepcion@deportesplus.com / admin123 (Norte)');
+  console.log('\n=== Sample Customers ===');
+  customers.forEach(c => console.log(`  ${c.name} - ${c.email}`));
   console.log('\nSeed completed!');
 }
 

@@ -1,13 +1,8 @@
 import { MembershipRole, RecordStatus } from '@prisma/client';
 import { z } from 'zod';
 
-const companyMembershipRoleSchema = z.union([
+const membershipRoleSchema = z.union([
   z.literal(MembershipRole.ADMIN_EMPRESA),
-  z.literal(MembershipRole.CAJERO),
-  z.literal(MembershipRole.RECEPCION),
-]);
-
-const branchMembershipRoleSchema = z.union([
   z.literal(MembershipRole.ADMIN_SEDE),
   z.literal(MembershipRole.CAJERO),
   z.literal(MembershipRole.RECEPCION),
@@ -34,14 +29,13 @@ export const createBranchSchema = z.object({
 export const createCompanyMemberSchema = z.object({
   email: z.string().trim().email().toLowerCase(),
   password: z.string().min(6),
-  role: companyMembershipRoleSchema,
+  role: membershipRoleSchema,
 });
 
 export const createBranchMemberSchema = z.object({
   email: z.string().trim().email().toLowerCase(),
   password: z.string().min(6),
-  companyRole: companyMembershipRoleSchema,
-  branchRole: branchMembershipRoleSchema,
+  role: membershipRoleSchema,
 });
 
 export const updateCompanySchema = z.object({
@@ -56,12 +50,11 @@ export const updateBranchSchema = z.object({
 });
 
 export const updateCompanyMemberSchema = z.object({
-  role: companyMembershipRoleSchema.optional(),
+  role: membershipRoleSchema.optional(),
   status: z.nativeEnum(RecordStatus).optional(),
 });
 
 export const updateBranchMemberSchema = z.object({
-  role: branchMembershipRoleSchema.optional(),
   status: z.nativeEnum(RecordStatus).optional(),
-  branchId: z.string().uuid().optional(),
+  branchId: z.string().cuid().optional(),
 });

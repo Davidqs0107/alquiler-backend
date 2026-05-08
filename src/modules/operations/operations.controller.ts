@@ -16,10 +16,12 @@ import {
   createPaymentReversalSchema,
   createTicketSchema,
   deactivateCatalogItemSchema,
+  extendRentalSchema,
   finishRentalSchema,
   listCatalogItemsQuerySchema,
   listTicketsQuerySchema,
   startRentalSchema,
+  startRentalSessionSchema,
   updateCatalogItemSchema,
   activateCatalogItemSchema,
 } from './operations.schemas';
@@ -371,6 +373,25 @@ export async function finishRentalHandler(req: Request, res: Response, next: Nex
   }
 }
 
+export async function startRentalSessionHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const rentalSessionId = String(req.params.rentalSessionId);
+    startRentalSessionSchema.parse(req.body ?? {});
+    const result = await operationsService.startRentalSession(
+      companyId,
+      branchId,
+      rentalSessionId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+    );
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 export async function createPaymentHandler(req: Request, res: Response, next: NextFunction) {
   try {
     const companyId = String(req.params.companyId);
@@ -420,6 +441,26 @@ export async function closeTicketHandler(req: Request, res: Response, next: Next
     const ticketId = String(req.params.ticketId);
     closeTicketSchema.parse(req.body ?? {});
     const result = await operationsService.closeTicket(companyId, branchId, ticketId, req.auth!.userId, req.auth!.globalRole);
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function extendRentalHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const companyId = String(req.params.companyId);
+    const branchId = String(req.params.branchId);
+    const rentalSessionId = String(req.params.rentalSessionId);
+    const body = extendRentalSchema.parse(req.body);
+    const result = await operationsService.extendRentalSession(
+      companyId,
+      branchId,
+      rentalSessionId,
+      req.auth!.userId,
+      req.auth!.globalRole,
+      body,
+    );
     return res.json(result);
   } catch (error) {
     return next(error);

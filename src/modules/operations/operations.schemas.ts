@@ -46,6 +46,8 @@ export const startRentalSchema = z.object({
   notes: z.string().trim().min(1).optional(),
 });
 
+export const startRentalSessionSchema = z.object({}).strict();
+
 export const addRentalToTicketSchema = startRentalSchema;
 
 export const finishRentalSchema = z.object({
@@ -104,3 +106,8 @@ export const cancelRentalSessionSchema = z.object({
 });
 
 export const closeTicketSchema = z.object({}).strict();
+
+export const extendRentalSchema = z.object({
+  additionalMinutes: z.coerce.number().int().positive(),
+  isOvertime: z.boolean().default(false),
+});

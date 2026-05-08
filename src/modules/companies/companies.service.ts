@@ -2,7 +2,7 @@ import { GlobalRole, MembershipRole, RecordStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { AppError } from '../../middlewares/error.middleware';
 import { hashPassword } from '../../utils/password';
-import { ensureBranchInCompany, ensureCompanyAccess, ensureCompanyMemberAccess } from './companies.access';
+import { ensureBranchAccess, ensureBranchInCompany, ensureCompanyAccess, ensureCompanyMemberAccess } from './companies.access';
 
 type CreateCompanyInput = {
   company: {
@@ -21,14 +21,13 @@ type CreateCompanyInput = {
 type CreateCompanyMemberInput = {
   email: string;
   password: string;
-  role: 'ADMIN_EMPRESA' | 'CAJERO' | 'RECEPCION';
+  role: 'ADMIN_EMPRESA' | 'ADMIN_SEDE' | 'CAJERO' | 'RECEPCION';
 };
 
 type CreateBranchMemberInput = {
   email: string;
   password: string;
-  companyRole: 'ADMIN_EMPRESA' | 'CAJERO' | 'RECEPCION';
-  branchRole: 'ADMIN_SEDE' | 'CAJERO' | 'RECEPCION';
+  role: 'ADMIN_EMPRESA' | 'ADMIN_SEDE' | 'CAJERO' | 'RECEPCION';
 };
 
 export async function createCompany(input: CreateCompanyInput) {
@@ -162,11 +161,11 @@ export async function listCompanies(userId: string, globalRole: GlobalRole) {
       status: RecordStatus.ACTIVE,
     },
     orderBy: {
-      company: { createdAt: 'desc' },
+      Company: { createdAt: 'desc' },
     },
     select: {
       role: true,
-      company: {
+      Company: {
         select: {
           id: true,
           name: true,
@@ -180,7 +179,7 @@ export async function listCompanies(userId: string, globalRole: GlobalRole) {
   });
 
   return memberships.map((membership) => ({
-    ...membership.company,
+    ...membership.Company,
     membershipRole: membership.role,
   }));
 }
@@ -219,7 +218,7 @@ export async function getCompanyById(companyId: string, userId: string, globalRo
       status: true,
       createdAt: true,
       updatedAt: true,
-      branches: {
+      Branch: {
         orderBy: { createdAt: 'asc' },
         select: {
           id: true,
@@ -229,14 +228,14 @@ export async function getCompanyById(companyId: string, userId: string, globalRo
           updatedAt: true,
         },
       },
-      users: {
+      CompanyUser: {
         select: {
           id: true,
           role: true,
           status: true,
           createdAt: true,
           updatedAt: true,
-          user: {
+          User: {
             select: {
               id: true,
               email: true,
@@ -322,8 +321,7 @@ export async function createBranchMember(
   actorGlobalRole: GlobalRole,
   input: CreateBranchMemberInput,
 ) {
-  await ensureCompanyAccess(companyId, actorUserId, actorGlobalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureBranchAccess(companyId, branchId, actorUserId, actorGlobalRole);
 
   const email = input.email.toLowerCase();
   const existingUser = await prisma.user.findUnique({
@@ -354,11 +352,11 @@ export async function createBranchMember(
       },
     });
 
-    const companyMembership = await tx.companyUser.create({
+    const membership = await tx.companyUser.create({
       data: {
         companyId,
         userId: user.id,
-        role: input.companyRole,
+        role: input.role,
         status: RecordStatus.ACTIVE,
       },
       select: {
@@ -375,20 +373,18 @@ export async function createBranchMember(
       data: {
         branchId,
         userId: user.id,
-        role: input.branchRole,
         status: RecordStatus.ACTIVE,
       },
       select: {
         id: true,
         branchId: true,
         userId: true,
-        role: true,
         status: true,
         createdAt: true,
       },
     });
 
-    return { user, companyMembership, branchMembership };
+    return { user, companyMembership: membership, branchMembership };
   });
 }
 
@@ -406,7 +402,7 @@ export async function listCompanyMembers(companyId: string, actorUserId: string,
       status: true,
       createdAt: true,
       updatedAt: true,
-      user: {
+      User: {
         select: {
           id: true,
           email: true,
@@ -426,8 +422,7 @@ export async function listBranchMembers(
   userId: string,
   globalRole: GlobalRole,
 ) {
-  await ensureCompanyAccess(companyId, userId, globalRole);
-  await ensureBranchInCompany(companyId, branchId);
+  await ensureBranchAccess(companyId, branchId, userId, globalRole);
 
   return prisma.branchUser.findMany({
     where: {
@@ -436,11 +431,10 @@ export async function listBranchMembers(
     orderBy: { createdAt: 'asc' },
     select: {
       id: true,
-      role: true,
       status: true,
       createdAt: true,
       updatedAt: true,
-      user: {
+      User: {
         select: {
           id: true,
           email: true,
@@ -598,7 +592,6 @@ export async function updateCompanyMember(
 }
 
 type UpdateBranchMemberInput = {
-  role?: MembershipRole;
   status?: RecordStatus;
   branchId?: string;
 };
@@ -646,14 +639,12 @@ export async function updateBranchMember(
         data: {
           userId: membership.userId,
           branchId: input.branchId!,
-          role: input.role || MembershipRole.RECEPCION,
           status: RecordStatus.ACTIVE,
         },
         select: {
           id: true,
           branchId: true,
           userId: true,
-          role: true,
           status: true,
           createdAt: true,
           updatedAt: true,
@@ -665,14 +656,12 @@ export async function updateBranchMember(
   return prisma.branchUser.update({
     where: { id: membershipId },
     data: {
-      ...(input.role !== undefined && { role: input.role }),
       ...(input.status !== undefined && { status: input.status }),
     },
     select: {
       id: true,
       branchId: true,
       userId: true,
-      role: true,
       status: true,
       createdAt: true,
       updatedAt: true,

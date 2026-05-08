@@ -18,11 +18,13 @@ import {
   createPaymentReversalHandler,
   createTicketHandler,
   deactivateCatalogItemHandler,
+  extendRentalHandler,
   finishRentalHandler,
   getTicketDetailHandler,
   listCatalogItemsHandler,
   listTicketsHandler,
   startRentalHandler,
+  startRentalSessionHandler,
   updateCatalogItemHandler,
 } from './operations.controller';
 
@@ -49,7 +51,9 @@ operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketI
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/cancel', cancelTicketHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/cancel-with-reversal', cancelTicketWithReversalHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/rentals/:rentalSessionId/cancel', cancelRentalSessionHandler);
+operationsRouter.post('/companies/:companyId/branches/:branchId/rentals/:rentalSessionId/start', startRentalSessionHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/rentals/:rentalSessionId/finish', finishRentalHandler);
+operationsRouter.post('/companies/:companyId/branches/:branchId/rentals/:rentalSessionId/extend', extendRentalHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/payments', createPaymentHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/payments/:paymentId/reversals', createPaymentReversalHandler);
 operationsRouter.post('/companies/:companyId/branches/:branchId/tickets/:ticketId/close', closeTicketHandler);

@@ -71,19 +71,18 @@ export async function getMe(userId: string) {
     },
     select: {
       role: true,
-      company: {
+      Company: {
         select: {
           id: true,
           name: true,
         },
       },
-      user: {
+      User: {
         include: {
-          branchMemberships: {
+          BranchUser: {
             where: { status: RecordStatus.ACTIVE },
             select: {
-              role: true,
-              branch: {
+              Branch: {
                 select: {
                   id: true,
                   name: true,
@@ -98,15 +97,15 @@ export async function getMe(userId: string) {
   });
 
   const formattedMemberships = memberships.map((membership) => ({
-    companyId: membership.company.id,
-    companyName: membership.company.name,
+    companyId: membership.Company.id,
+    companyName: membership.Company.name,
     companyRole: membership.role,
-    branches: membership.user.branchMemberships
-      .filter((bm) => bm.branch.companyId === membership.company.id)
+    branches: membership.User.BranchUser
+      .filter((bm) => bm.Branch.companyId === membership.Company.id)
       .map((bm) => ({
-        companyId: membership.company.id,
-        branchId: bm.branch.id,
-        branchName: bm.branch.name,
+        companyId: membership.Company.id,
+        branchId: bm.Branch.id,
+        branchName: bm.Branch.name,
       })),
   }));
 
